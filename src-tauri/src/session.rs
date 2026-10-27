@@ -184,7 +184,8 @@ fn run(
                 let p = &mut *guard;
                 // FPS cap on a fixed grid: one frame per 1/fps slot (rounded). Comparing against
                 // the previous frame instead lets one early (jittered) frame cost a whole slot:
-                // measured 47 fps on 60-on-60 that way. A 144Hz monitor still yields ≤ fps.
+                // measured 47 fps on 60-on-60 that way. On 144Hz, picking the nearest vblank per
+                // slot alternates 13.9/20.8ms gaps but averages exactly `fps`.
                 let slot = (pts + interval / 2) / interval;
                 if p.last_slot >= 0 && slot <= p.last_slot {
                     return;

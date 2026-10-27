@@ -117,6 +117,16 @@ impl CaptureSession {
         let _ = session.SetIsCursorCaptureEnabled(cursor);
         // Win11: no yellow capture border. Older builds reject it; not fatal.
         let _ = session.SetIsBorderRequired(false);
+        // WGC throttles delivery to MinUpdateInterval (default ~1/60s), then waits for the
+        // next DWM vblank. On a 144Hz panel the first vblank after 16.7ms is 20.8ms → a
+        // locked 48fps. Ask for every vblank instead; the session's slot grid does the
+        // fps capping. Pre-24H2 builds lack the property (error ignored, old behavior).
+        if cfg!(debug_assertions) {
+            if let Ok(t) = session.MinUpdateInterval() {
+                eprintln!("[wgc] default MinUpdateInterval {}us", t.Duration / 10);
+            }
+        }
+        let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: 10_000 });
         session.StartCapture()?;
         Ok(Self { pool, session, item, frame_token, closed_token })
     }
