@@ -2,11 +2,18 @@
   "name": "oculus",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
+    "prebuild": "npm run check:version",
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
+    "verify:stress": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stress-recording.ps1",
+    "test": "node --test tests/*.test.js",
+    "check:version": "node scripts/version.mjs --check",
+    "set:version": "node scripts/version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

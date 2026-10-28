@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "screenshot-feedback",
+  "description": "Screenshot preview: subscribe to saved-output state without window or dialog permissions.",
+  "windows": ["screenshot-feedback"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

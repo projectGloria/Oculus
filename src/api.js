@@ -10,6 +10,7 @@ export const api = {
   stop: () => invoke("stop_recording"),
   togglePause: () => invoke("toggle_pause"),
   selectRegion: () => invoke("select_region"),
+  recordRegion: () => invoke("record_region"),
   screenshot: () => invoke("take_screenshot"),
   screenshotRegion: () => invoke("screenshot_region"),
   getSettings: () => invoke("get_settings"),
@@ -17,6 +18,18 @@ export const api = {
   hideToTray: () => invoke("hide_to_tray"),
   reveal: (path) => invoke("reveal", { path }),
   openOutputDir: () => invoke("open_output_dir"),
+  openMicrophoneSettings: () => invoke("open_microphone_settings"),
+  savedFileDetails: (path) => invoke("saved_file_details", { path }),
+  openSavedFile: (path) => invoke("open_saved_file", { path }),
+  copySavedFile: (path) => invoke("copy_saved_file", { path }),
+  renameSavedFile: (path, name) => invoke("rename_saved_file", { path, name }),
+  deleteSavedFile: (path) => invoke("delete_saved_file", { path }),
+  dismissScreenshotFeedback: () => invoke("dismiss_screenshot_feedback"),
+  dragSavedFile: (path) => invoke("drag_saved_file", { path }),
+  retryHotkeys: () => invoke("retry_hotkeys"),
+  getDiagnostics: () => invoke("get_diagnostics"),
+  listAudioDevices: () => invoke("list_audio_devices"),
+  toggleAudioMute: (source) => invoke("toggle_audio_mute", { source }),
 };
 
 export const fileName = (p) => p?.split(/[\\/]/).pop() ?? "";

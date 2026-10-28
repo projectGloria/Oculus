@@ -1,5 +1,8 @@
 use std::borrow::Cow;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+use image::ImageEncoder;
 
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D11::*;
@@ -8,7 +11,16 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use crate::capture::gpu::{texture_size, Gpu};
 use crate::capture::wgc::{self, Target};
 use crate::error::{msg, Result};
-use crate::util::local_stamp;
+use crate::util::{local_stamp, reserve_output};
+
+pub fn play_sound() {
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+    static SOUND: &[u8] = include_bytes!("../assets/shutter.wav");
+    unsafe {
+        let _ = PlaySoundW(PCWSTR(SOUND.as_ptr().cast()), None, SND_ASYNC | SND_MEMORY | SND_NODEFAULT);
+    }
+}
 
 pub fn capture(target: Target, crop: Option<RECT>, cursor: bool, dir: &Path, copy: bool) -> Result<PathBuf> {
     let gpu = Gpu::new()?;
@@ -26,7 +38,8 @@ pub fn save(gpu: &Gpu, tex: &ID3D11Texture2D, crop: Option<RECT>, dir: &Path, co
         return Err(msg("Empty capture area"));
     }
 
-    let staging = gpu.texture(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_FLAG(0), D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ)?;
+    let staging =
+        gpu.texture(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_FLAG(0), D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ)?;
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     unsafe {
         let bx = D3D11_BOX { left: l, top: t, front: 0, right: l + w, bottom: t + h, back: 1 };
@@ -38,7 +51,7 @@ pub fn save(gpu: &Gpu, tex: &ID3D11Texture2D, crop: Option<RECT>, dir: &Path, co
         for y in 0..h as usize {
             let src = std::slice::from_raw_parts((m.pData as *const u8).add(y * m.RowPitch as usize), w as usize * 4);
             let dst = &mut rgba[y * w as usize * 4..(y + 1) * w as usize * 4];
-            for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+            for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
                 d.copy_from_slice(&[s[2], s[1], s[0], 255]);
             }
         }
@@ -46,12 +59,37 @@ pub fn save(gpu: &Gpu, tex: &ID3D11Texture2D, crop: Option<RECT>, dir: &Path, co
     }
 
     std::fs::create_dir_all(dir)?;
-    let path = dir.join(format!("Oculus {}.png", local_stamp()));
-    image::save_buffer(&path, &rgba, w, h, image::ExtendedColorType::Rgba8)?;
+    let (path, file) = reserve_output(dir, &format!("Oculus {}", local_stamp()), "png")?;
+    let result = (|| -> Result<()> {
+        let mut output = BufWriter::new(file);
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut output,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::Adaptive,
+        )
+        .write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)?;
+        output.flush()?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
     if copy {
         // Clipboard failure (another app holding it open) shouldn't fail the screenshot.
-        if let Ok(mut cb) = arboard::Clipboard::new() {
-            let _ = cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: Cow::Owned(rgba) });
+        let image_copied = arboard::Clipboard::new()
+            .and_then(|mut cb| {
+                cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: Cow::Owned(rgba) })
+            })
+            .is_ok();
+        if let Ok(_clipboard) = clipboard_win::Clipboard::new_attempts(10) {
+            let name = crate::shell::shell_name(&path).to_string_lossy();
+            if image_copied {
+                // Append file-drop data without discarding the image representation.
+                let _ = clipboard_win::raw::set_file_list(&[name]);
+            } else {
+                let _ = clipboard_win::raw::set_file_list_with(&[name], clipboard_win::options::DoClear);
+            }
         }
     }
     Ok(path)

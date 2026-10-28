@@ -3,6 +3,7 @@ name = "oculus"
 version = "0.1.0"
 description = "Lean screen recorder"
 edition = "2021"
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -17,16 +18,24 @@ thiserror = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 windows-core = "0.62"
 arboard = { version = "3", default-features = false, features = ["image-data"] }
+base64 = "0.23"
+clipboard-win = "5"
+tauri-plugin-single-instance = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 
 [dependencies.windows]
 version = "0.62"
 features = [
+  "Wdk_System_SystemServices",
   "Foundation",
+  "Foundation_Metadata",
   "Graphics",
   "Graphics_Capture",
   "Graphics_DirectX",
   "Graphics_DirectX_Direct3D11",
   "Win32_Foundation",
+  "Win32_Devices_FunctionDiscovery",
   "Win32_Graphics_Direct2D",
   "Win32_Graphics_Direct2D_Common",
   "Win32_Graphics_Direct3D",
@@ -36,6 +45,7 @@ features = [
   "Win32_Graphics_Dxgi",
   "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
   "Win32_Media_Audio",
   "Win32_Media_KernelStreaming",
   "Win32_Media_MediaFoundation",
@@ -44,9 +54,13 @@ features = [
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_Registry",
+  "Win32_Security",
   "Win32_System_Performance",
   "Win32_System_SystemInformation",
   "Win32_System_ProcessStatus",
+  "Win32_System_Shutdown",
   "Win32_System_Threading",
   "Win32_System_Variant",
   "Win32_System_WinRT",
@@ -55,6 +69,8 @@ features = [
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_Shell_PropertiesSystem",
   "Win32_UI_WindowsAndMessaging",
 ]
 

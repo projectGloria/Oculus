@@ -4,6 +4,8 @@
 //!
 //! Flags: --secs N  --pause A,B (pause at A s for B s)  --sys  --mic  --fps N
 //!        --hevc  --window <title substring>  --region x,y,w,h  --shot <out.png>
+//!        --kill-at T (hard exit after T wall seconds, without finalizing)
+//!        --stall-writer-ms N / --stall-mixer-ms N (one-time backpressure injection)
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -17,10 +19,86 @@ use crate::sources;
 use crate::util::com_init;
 use windows::Win32::Foundation::RECT;
 
+pub fn inject_delay(flag: &str) {
+    let args: Vec<String> = std::env::args().collect();
+    if !args.iter().any(|arg| arg == "--selftest") {
+        return;
+    }
+    if let Some(ms) = args
+        .iter()
+        .position(|arg| arg == flag)
+        .and_then(|index| args.get(index + 1))
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        std::thread::sleep(Duration::from_millis(ms.min(60_000)));
+    }
+}
+
+/// Exercise the real Recorder state machine, including its startup and quit callbacks.
+/// `--selftest-app <temporary output directory> [--cancel-start] [--finalize-delay-ms N]`
+/// changes settings in memory only and exits automatically. No input injection is used.
+pub fn install_app_driver(app: &tauri::AppHandle) {
+    use crate::recorder::Recorder;
+    use tauri::Manager;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) != Some("--selftest-app") {
+        return;
+    }
+    let Some(output) = args.get(1) else {
+        app.exit(2);
+        return;
+    };
+    app.state::<crate::settings::SettingsStore>().configure_selftest(PathBuf::from(output));
+    let cancel = args.iter().any(|a| a == "--cancel-start");
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let recorder = app.state::<Recorder>();
+        if cancel {
+            let a = app.clone();
+            let starter = std::thread::spawn(move || a.state::<Recorder>().start(&a));
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !recorder.is_active() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let before = Instant::now();
+            recorder.stop(&app);
+            let stop_ms = before.elapsed().as_millis();
+            println!("stop during startup returned in {stop_ms}ms");
+            if stop_ms > 100 || !matches!(starter.join(), Ok(Ok(()))) {
+                eprintln!("startup cancellation failed");
+                app.exit(1);
+                return;
+            }
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while recorder.is_active() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if recorder.is_active() {
+                eprintln!("cancelled startup never finished");
+                app.exit(1);
+                return;
+            }
+            println!("startup cancellation completed");
+        } else {
+            if let Err(e) = recorder.start(&app) {
+                eprintln!("app recording failed: {e}");
+                app.exit(1);
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+            println!("requesting quit with an active recording");
+        }
+        recorder.request_exit(&app);
+    });
+}
+
 pub fn run(args: &[String]) -> i32 {
     com_init();
     let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let has = |name: &str| args.iter().any(|a| a == name);
+    if has("--panic") {
+        panic!("Oculus selftest panic hook");
+    }
 
     // Input injection for driving the real app end-to-end: hotkeys go through the actual
     // RegisterHotKey path, drags through the actual overlay wndproc.
@@ -35,13 +113,22 @@ pub fn run(args: &[String]) -> i32 {
     }
     if let Some(p) = flag("--cursor") {
         let v: Vec<i32> = p.split(',').map(|x| x.trim().parse().unwrap()).collect();
-        unsafe { let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(v[0], v[1]); }
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(v[0], v[1]);
+        }
         return 0;
     }
     if let Some(t) = flag("--close") {
         use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
         for w in sources::list().windows.iter().filter(|w| w.title == t) {
-            let _ = unsafe { PostMessageW(Some(windows::Win32::Foundation::HWND(w.id as _)), WM_CLOSE, Default::default(), Default::default()) };
+            let _ = unsafe {
+                PostMessageW(
+                    Some(windows::Win32::Foundation::HWND(w.id as _)),
+                    WM_CLOSE,
+                    Default::default(),
+                    Default::default(),
+                )
+            };
             println!("closed {}", w.title);
         }
         return 0;
@@ -80,7 +167,7 @@ pub fn run(args: &[String]) -> i32 {
     };
     let crop = flag("--region").map(|r| {
         let v: Vec<i32> = r.split(',').map(|x| x.trim().parse().unwrap()).collect();
-        RECT { left: v[0] & !1, top: v[1] & !1, right: (v[0] & !1) + (v[2] & !1), bottom: (v[1] & !1) + (v[3] & !1) }
+        RECT { left: v[0], top: v[1], right: v[0] + v[2], bottom: v[1] + v[3] }
     });
 
     if let Some(shot) = flag("--shot") {
@@ -98,6 +185,7 @@ pub fn run(args: &[String]) -> i32 {
     }
 
     let secs: f64 = flag("--secs").and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    let kill_at = flag("--kill-at").and_then(|s| s.parse::<f64>().ok());
     let pause: Option<(f64, f64)> = flag("--pause").map(|p| {
         let v: Vec<f64> = p.split(',').map(|x| x.parse().unwrap()).collect();
         (v[0], v[1])
@@ -106,11 +194,23 @@ pub fn run(args: &[String]) -> i32 {
         target,
         crop,
         fps: flag("--fps").and_then(|s| s.parse().ok()).unwrap_or(60),
+        constant_frame_rate: !has("--vfr"),
+        output_height: flag("--height").and_then(|s| s.parse().ok()).unwrap_or(0),
+        custom_bitrate_mbps: flag("--bitrate").and_then(|s| s.parse().ok()),
+        rate_control: if has("--cbr") {
+            crate::settings::RateControl::Cbr
+        } else if has("--vbr") {
+            crate::settings::RateControl::Vbr
+        } else {
+            crate::settings::RateControl::Default
+        },
         bpp: 0.08,
         codec: if has("--hevc") { Codec::Hevc } else { Codec::H264 },
         cursor: true,
         system_audio: has("--sys"),
         mic: has("--mic"),
+        system_device: None,
+        mic_device: None,
         gains: Gains { system: 1.0, mic: 1.0 },
         path: PathBuf::from(&out),
     };
@@ -137,6 +237,10 @@ pub fn run(args: &[String]) -> i32 {
     let mut paused_at: Option<Instant> = None;
     let mut ended = None;
     while started.elapsed().as_secs_f64() < secs {
+        if kill_at.is_some_and(|t| started.elapsed().as_secs_f64() >= t) {
+            // No unwinding, stop message or Finalize: reproduce Task Manager termination.
+            std::process::exit(86);
+        }
         if let Ok(o) = rx.recv_timeout(Duration::from_millis(20)) {
             ended = Some(o);
             break;
@@ -168,6 +272,19 @@ pub fn run(args: &[String]) -> i32 {
     };
     let f = handle.stats.frames.load(std::sync::atomic::Ordering::Relaxed);
     let d = handle.stats.dropped.load(std::sync::atomic::Ordering::Relaxed);
+    println!(
+        "queues: writer peak {}, audio peak {}, rejected writer {}, audio {}",
+        handle.stats.writer_queue.peak.load(std::sync::atomic::Ordering::Relaxed),
+        handle.stats.audio_queue.peak.load(std::sync::atomic::Ordering::Relaxed),
+        handle.stats.writer_queue.full.load(std::sync::atomic::Ordering::Relaxed),
+        handle.stats.audio_queue.full.load(std::sync::atomic::Ordering::Relaxed)
+    );
+    let timings = *handle.stats.write_timings.lock().unwrap();
+    println!("timeline: video end {}ms, clock {:?}ms", o.duration_ms, handle.clock.now().map(|pts| pts / 10_000));
+    println!(
+        "sample writes: video max {}us, audio max {}us, slow calls {}",
+        timings.video_max_us, timings.audio_max_us, timings.slow_calls
+    );
     match o.result {
         Ok(()) => {
             let wall = started.elapsed().as_secs_f64();
@@ -188,7 +305,11 @@ fn key(vk: u16, up: bool) -> windows::Win32::UI::Input::KeyboardAndMouse::INPUT 
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, ..Default::default() },
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                ..Default::default()
+            },
         },
     }
 }
@@ -203,7 +324,8 @@ fn send_hotkey(letter: u8) {
 
 fn mouse(flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
-    let i = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dwFlags: flags, ..Default::default() } } };
+    let i =
+        INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dwFlags: flags, ..Default::default() } } };
     unsafe { SendInput(&[i], std::mem::size_of::<INPUT>() as i32) };
 }
 
@@ -229,7 +351,9 @@ fn drag(x1: i32, y1: i32, x2: i32, y2: i32) {
 fn mem_report() {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::*;
-    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+    use windows::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    };
     use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     let mut all = Vec::new();
     unsafe {
@@ -244,10 +368,13 @@ fn mem_report() {
         let _ = CloseHandle(snap);
     }
     let me = unsafe { GetCurrentProcessId() };
-    let mut set: Vec<u32> = all.iter().filter(|p| p.2.eq_ignore_ascii_case("oculus.exe") && p.0 != me).map(|p| p.0).collect();
+    let mut set: Vec<u32> =
+        all.iter().filter(|p| p.2.eq_ignore_ascii_case("oculus.exe") && p.0 != me).map(|p| p.0).collect();
     loop {
         let more: Vec<u32> = all.iter().filter(|p| set.contains(&p.1) && !set.contains(&p.0)).map(|p| p.0).collect();
-        if more.is_empty() { break; }
+        if more.is_empty() {
+            break;
+        }
         set.extend(more);
     }
     let (mut ws, mut pv) = (0usize, 0usize);
@@ -256,8 +383,18 @@ fn mem_report() {
         unsafe {
             let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, *pid) else { continue };
             let mut c = PROCESS_MEMORY_COUNTERS_EX::default();
-            if GetProcessMemoryInfo(h, &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32).is_ok() {
-                println!("  {name:<22} ws {:>6.1} MB  private {:>6.1} MB", c.WorkingSetSize as f64 / 1048576.0, c.PrivateUsage as f64 / 1048576.0);
+            if GetProcessMemoryInfo(
+                h,
+                &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS,
+                std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+            )
+            .is_ok()
+            {
+                println!(
+                    "  {name:<22} ws {:>6.1} MB  private {:>6.1} MB",
+                    c.WorkingSetSize as f64 / 1048576.0,
+                    c.PrivateUsage as f64 / 1048576.0
+                );
                 ws += c.WorkingSetSize;
                 pv += c.PrivateUsage;
             }
@@ -270,8 +407,11 @@ fn mem_report() {
 fn cpu_secs() -> f64 {
     use windows::Win32::Foundation::FILETIME;
     use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
-    let (mut c, mut e, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
-    unsafe { let _ = GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u); }
+    let (mut c, mut e, mut k, mut u) =
+        (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    unsafe {
+        let _ = GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u);
+    }
     let t = |f: FILETIME| ((f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64) as f64 / 1e7;
     t(k) + t(u)
 }

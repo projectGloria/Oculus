@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use windows::core::Interface;
 use windows::Foundation::TypedEventHandler;
-use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
-};
+use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D11::*;
@@ -16,7 +14,7 @@ use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 
 use super::gpu::{texture_size, Gpu};
-use crate::error::{msg, Result};
+use crate::error::{msg, Result, ResultContext};
 use crate::util::Mta;
 
 #[derive(Clone, Copy, Debug)]
@@ -26,11 +24,16 @@ pub enum Target {
 }
 
 pub fn create_item(target: Target) -> Result<GraphicsCaptureItem> {
-    let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+    crate::platform::require_supported_windows()?;
+    if !GraphicsCaptureSession::IsSupported().unwrap_or(false) {
+        return Err(msg("Windows screen capture is unavailable. Oculus requires Windows 10 version 2004 or later, a supported graphics driver and an interactive desktop session."));
+    }
+    let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
+        .context("Opening Windows Graphics Capture")?;
     unsafe {
         Ok(match target {
-            Target::Monitor(h) => interop.CreateForMonitor(HMONITOR(h as _))?,
-            Target::Window(h) => interop.CreateForWindow(HWND(h as _))?,
+            Target::Monitor(h) => interop.CreateForMonitor(HMONITOR(h as _)).context("Opening selected display")?,
+            Target::Window(h) => interop.CreateForWindow(HWND(h as _)).context("Opening selected window")?,
         })
     }
 }
@@ -58,13 +61,7 @@ pub struct CaptureSession {
 }
 
 impl CaptureSession {
-    pub fn start<F, C>(
-        gpu: &Gpu,
-        item: GraphicsCaptureItem,
-        cursor: bool,
-        on_frame: F,
-        on_closed: C,
-    ) -> Result<Self>
+    pub fn start<F, C>(gpu: &Gpu, item: GraphicsCaptureItem, cursor: bool, on_frame: F, on_closed: C) -> Result<Self>
     where
         F: Fn(Frame) + Send + 'static,
         C: Fn() + Send + 'static,
@@ -95,14 +92,13 @@ impl CaptureSession {
                 // Window resized: grow/shrink the pool so later frames aren't clipped.
                 // The encoder canvas stays fixed; the converter letterboxes into it.
                 let mut ps = pool_size.lock().unwrap();
-                if content.Width != ps.Width || content.Height != ps.Height {
-                    if content.Width > 0 && content.Height > 0 {
-                        // Bind the wrapper, not `device.0`: edition-2021 closures capture
-                        // disjoint fields, which would capture the !Send interface directly.
-                        let device = &device;
-                        pool.Recreate(&device.0, FORMAT, 2, content)?;
-                        *ps = content;
-                    }
+                if (content.Width != ps.Width || content.Height != ps.Height) && content.Width > 0 && content.Height > 0
+                {
+                    // Bind the wrapper, not `device.0`: edition-2021 closures capture
+                    // disjoint fields, which would capture the !Send interface directly.
+                    let device = &device;
+                    pool.Recreate(&device.0, FORMAT, 2, content)?;
+                    *ps = content;
                 }
                 Ok(())
             },
@@ -123,7 +119,7 @@ impl CaptureSession {
         // fps capping. Pre-24H2 builds lack the property (error ignored, old behavior).
         if cfg!(debug_assertions) {
             if let Ok(t) = session.MinUpdateInterval() {
-                eprintln!("[wgc] default MinUpdateInterval {}us", t.Duration / 10);
+                tracing::info!(interval_us = t.Duration / 10, "WGC default update interval");
             }
         }
         let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: 10_000 });

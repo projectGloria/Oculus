@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api.js";
+import { newestSnapshot } from "../recorderSnapshot.js";
 
 const INITIAL = {
   seq: 0,
@@ -16,7 +17,7 @@ const INITIAL = {
 
 // Every snapshot is complete, so "newest seq wins" is the whole merge strategy. It also makes
 // the hydrate call and live events order-independent.
-const newest = (prev, next) => (next.seq > prev.seq ? next : prev);
+const newest = (prev, next) => newestSnapshot(prev, next, performance.now());
 
 /**
  * Recorder state, owned by Rust. This webview may be created mid-recording (it's destroyed
@@ -39,7 +40,9 @@ export function useRecorder() {
       unlisten = un;
       const s = await api.getRecorderState();
       if (alive) setSnap((p) => newest(p, s));
-    })();
+    })().catch((error) => {
+      if (alive) setSnap((prev) => ({ ...prev, error: `Cannot read recorder state: ${error}` }));
+    });
     return () => {
       alive = false;
       unlisten?.();

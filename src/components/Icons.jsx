@@ -16,6 +16,12 @@ export const Speaker = (p) => (
 export const Mic = (p) => (
   <svg {...base} {...p}><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v5" /></svg>
 );
+export const MicOff = (p) => (
+  <svg {...base} {...p}><path d="M9 9v3a3 3 0 0 0 5 2M15 9V5a3 3 0 0 0-5-2M5 10a7 7 0 0 0 12 5M19 10v2M12 19v3M8 22h8M3 3l18 18" /></svg>
+);
+export const SpeakerOff = (p) => (
+  <svg {...base} {...p}><path d="M11 5 6 9H2v6h4l5 4V5zM16 9l6 6M22 9l-6 6" /></svg>
+);
 export const Camera = (p) => (
   <svg {...base} {...p}><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
 );

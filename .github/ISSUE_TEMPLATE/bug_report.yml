@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a recording, screenshot or interface problem.
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include reproduction steps, expected behavior and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Oculus version, Windows build, GPU/driver, monitor resolution/refresh/DPI, codec and audio devices.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics and validation
+      description: Include relevant local log excerpts and checks performed. Review logs and recordings for private information before attaching them.

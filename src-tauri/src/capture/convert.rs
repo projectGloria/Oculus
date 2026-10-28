@@ -94,7 +94,13 @@ impl Converter {
         Ok(view)
     }
 
-    pub fn blit(&mut self, src: &ID3D11Texture2D, content_w: u32, content_h: u32, dst: &ID3D11VideoProcessorOutputView) -> Result<()> {
+    pub fn blit(
+        &mut self,
+        src: &ID3D11Texture2D,
+        content_w: u32,
+        content_h: u32,
+        dst: &ID3D11VideoProcessorOutputView,
+    ) -> Result<()> {
         let src_rect = match self.crop {
             Some(c) => RECT {
                 left: c.left.min(content_w as i32),
@@ -238,14 +244,14 @@ impl Nv12Pool {
             None if self.created < POOL_CAP => self.create(conv)?,
             None => return Ok(None),
         };
+        Ok(Some(self.arm(sample)?))
+    }
+
+    fn arm(&self, sample: IMFSample) -> Result<PooledFrame> {
         unsafe {
             // One-shot: must be re-armed every time the sample goes out.
             sample.cast::<IMFTrackedSample>()?.SetAllocator(&self.callback, None)?;
-            Ok(Some(PooledFrame {
-                texture: sample.GetUnknown(&KEY_TEXTURE)?,
-                view: sample.GetUnknown(&KEY_VIEW)?,
-                sample,
-            }))
+            Ok(PooledFrame { texture: sample.GetUnknown(&KEY_TEXTURE)?, view: sample.GetUnknown(&KEY_VIEW)?, sample })
         }
     }
 }
@@ -253,5 +259,24 @@ impl Nv12Pool {
 impl Drop for Nv12Pool {
     fn drop(&mut self) {
         self.free.lock().unwrap().clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_letterboxes_landscape_portrait_and_odd_inputs_on_even_boundaries() {
+        for (w, h, ow, oh) in [(1920, 1080, 1280, 720), (1080, 1920, 1920, 1080), (1919, 1079, 1280, 720)] {
+            let r = fit(w, h, ow, oh);
+            assert!(r.left >= 0 && r.top >= 0 && r.right <= ow && r.bottom <= oh);
+            assert!(r.right > r.left && r.bottom > r.top);
+            for edge in [r.left, r.top, r.right, r.bottom] {
+                assert_eq!(edge % 2, 0);
+            }
+            let ratio = (r.right - r.left) as f64 / (r.bottom - r.top) as f64;
+            assert!((ratio - w as f64 / h as f64).abs() < 0.01);
+        }
     }
 }
