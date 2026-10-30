@@ -149,7 +149,19 @@ A successful screenshot displays a floating preview for approximately five secon
 
 Saved-file actions include Open, Show in folder, Copy file, Rename, and Delete. Rename preserves the extension and refuses overwrite. Delete is permanent after confirmation; there is no Recycle Bin or undo implementation. Missing thumbnails leave file actions usable with a fallback icon.
 
-The card describes the latest remembered output; it is not a persistent recent-recordings library.
+The card describes the latest remembered output. Expand **Recent recordings** in the panel
+for the last ten completed or retained partial recordings, newest first, with thumbnails and
+the same file actions. Rust owns this bounded list, so hiding to the tray and recreating the
+panel preserves it. Rename and delete update the list and latest-save card together.
+Screenshots do not evict recordings. The list clears on app exit; persistence across restarts
+remains future work. File actions still require membership in the current output folder.
+
+Local validation on 2026-10-28: four history regression tests cover bounds/order, partial files,
+authorization, duplicate paths, and rename/delete propagation. The suite passed 67 Rust tests
+(one existing Explorer test ignored) and 17 JavaScript tests. Formatting, Clippy, frontend and
+debug desktop builds passed. Three short desktop recordings with system audio decoded fully;
+pause/resume, newest-first display, thumbnails, expanded scrolling and tray recreation were
+checked locally. These checks do not replace the longer hardware acceptance tests below.
 
 ## 4. How to use Oculus
 
@@ -319,6 +331,12 @@ Stop freezes the clock immediately. Teardown then closes capture, stops/joins au
 
 The writer media queue holds at most 128 packets; audio input holds at most 64. Producers use nonblocking sends. A separate one-slot control channel carries Stop/end requests, so a full media queue cannot block the UI's Stop command.
 
+The writer drains media while polling audio preflight notifications. Capture and the mixer
+already run at this point, so waiting synchronously for a slow endpoint would fill the writer
+queue even with a healthy encoder. Starting remains visible until all initial audio health
+notifications arrive or their workers exit. Ending capture before that point reports a startup
+failure instead of committing an already-ended session.
+
 New output filenames are reserved atomically with collision suffixes. Failed startup cleans up its placeholder. Runtime recording failures retain partial output and report its location.
 
 H.264 writes completed MP4 fragments during recording. HEVC uses the regular MP4 sink because the tested fragmented sink rejects its media type. Neither path guarantees data still buffered by the OS during power loss.
@@ -421,6 +439,8 @@ This is the project's consolidated change log. Detailed behavior and evidence ap
 
 | Version/state | Changes |
 | --- | --- |
+| Unreleased — startup reliability | Drain media during audio preflight, reproduce delayed readiness in debug builds, verify the regression, and retain stress-run environment/storage evidence |
+| Unreleased — recent recordings | Expandable last-ten recording list for the current app session, including partial outputs, thumbnails, file actions, and synchronized rename/delete |
 | Unreleased — timing reliability | Constant frame grid for H.264, independently pooled GPU repeats, Stop-time clock freeze, aligned final frame/audio endpoint, encoder-write diagnostics and repeated/long resource checks |
 | Unreleased — recording safety | Interrupted H.264 retention, coordinated exit/finalization, bounded buffers, device recovery and preserved partial output |
 | Unreleased — files and screenshots | Saved-output cards/actions, screenshot preview, optional shutter sound, native file dragging and image/file clipboard formats |
@@ -463,14 +483,14 @@ These are the latest retained results, not a new rerun performed solely to write
 
 | Check | Result |
 | --- | --- |
-| Rust unit tests | 63 passed; one interactive Explorer test ignored by the regular runner |
+| Rust unit tests | 69 passed after the startup fix; one interactive Explorer test ignored by the regular runner |
 | Interactive Explorer test | Previously run separately and passed |
 | JavaScript tests | 17 passed |
 | Rust formatting/Clippy | Formatting check and all-target Clippy with warnings denied passed |
 | Frontend/debug/release | Builds passed |
 | NSIS | Built successfully; current artifact is 1,858,599 bytes, approximately 1.77 MiB |
 | Release executable | 5,772,800 bytes, approximately 5.51 MiB; opened successfully |
-| Full media verifier | H.264/HEVC decode/seek, pause/resume, Stop while paused, overload retention, hard exit, startup cancellation, delayed quit |
+| Full media verifier | H.264/HEVC decode/seek, delayed audio preflight, pause/resume, Stop while paused, overload retention, hard exit, startup cancellation, delayed quit |
 | Repeated recordings | Six eight-second wall-time clips with a three-second pause; all passed |
 | Five-minute recording | CFR, audio endpoints, decode, seeking, and resource bounds passed |
 | Static-window recording | One delivered WGC frame produced a valid 30-second CFR recording |
@@ -554,6 +574,36 @@ Physical synchronization still requires observing a matching visual/audible even
 | Production WebView | Release opened its bundled `tauri.localhost` interface after permission/CSP changes |
 
 Native panel dragging/minimizing and completing a folder-selection change remain pending. An earlier desktop helper could not obtain the required input geometry for the minimize check. Tray artwork still needs visual review across taskbar themes and scales. These qualifications remain even though the relevant code and permissions exist.
+
+### 9.7 Delayed audio-preflight regression — 2026-10-28
+
+The writer previously waited synchronously for audio readiness after WGC and the mixer
+started producing data. A debug-only additional readiness gate delayed notification by five
+seconds while keeping the actual endpoints running. This reproduced an overload without
+slowing the encoder or disk. The writer now polls readiness while draining media; its
+128-packet capacity and the 64-packet audio-input capacity are unchanged.
+
+| Same five-second gate, then three-second selftest | Before | After |
+| --- | --- | --- |
+| Writer queue peak | 128 | 2 |
+| Rejected writer packets | 298 | 0 |
+| Maximum video sample write | 400 µs | 687 µs |
+| Maximum audio sample write | 43,571 µs | 50 µs |
+| Video duration | 333 ms, recording failed | 8.016667 s, recording succeeded |
+| AAC duration after fix | — | 8.021333 s |
+
+The fixed file fully decoded. Two polling/disconnection unit tests and the expanded full
+verifier passed, including H.264/HEVC, pause/resume, Stop while paused, deliberate overload,
+hard termination, startup cancellation and delayed quit. This proves the startup failure
+path and its fix; the earlier isolated overload did not retain enough evidence to conclusively
+attribute it to this path.
+
+The fixed eight-second recording also opened in the installed mpv player, played to its
+eight-second endpoint, and displayed frames after forward/backward seeking. This is a local
+player compatibility check; Premiere/DaVinci and acoustic synchronization remain unverified.
+
+Before/after artifacts: `%TEMP%\oculus-preflight-343be8a5fc0b415cb1d22c4362e8cb82`.
+Full verifier: `%TEMP%\oculus-verify-67fc9c61fa9c467c8be688e09224eb61`.
 
 ## 10. Remaining reliability work and acceptance checks
 
@@ -647,7 +697,7 @@ Whole-window snapping and Shift-square drawing already exist. Their broader vali
 
 Planned screenshot work includes JPEG/WebP options, delayed capture, optional transparent window corners/shadows, annotation/crop/blur tools, scrolling capture, OCR to clipboard, HDR-aware output, and device caching.
 
-PNG already uses fast compression and adaptive filtering. A repeatable 4K speed/quality benchmark and clipboard-latency evaluation remain. Sound and drag initiation exist; actual drag destination acceptance is pending. A persistent recent-recordings list is missing.
+PNG already uses fast compression and adaptive filtering. A repeatable 4K speed/quality benchmark and clipboard-latency evaluation remain. Sound and drag initiation exist; actual drag destination acceptance is pending. The session's last ten recordings are available in the panel; persistence across restarts remains open.
 
 ### 11.5 Daily-use interface and workflows
 
@@ -700,25 +750,24 @@ Later ideas include webcam bubbles, composed scenes, live pen/highlighter/spotli
 
 Linux/macOS, streaming, a full editor, mandatory accounts/cloud, and telemetry remain outside the current product scope. They should not be treated as unfinished requirements for your personal Windows recorder.
 
-## 12. Recommended order for personal use
+## 12. Implementation phases for personal use
 
-### Stage A — establish confidence in recordings
+Each phase ends with focused tests, relevant desktop acceptance checks, and updates to this
+guide and TODO. The session-based recent-recordings feature is already implemented.
 
-Complete the one-hour soak and 15-minute acoustic test, then validate import/playback in the applications you actually use. Collect the new diagnostics if an overload appears. Accept this stage when the result is decodable, seeking works, resource growth is understood, and physical sync meets the intended tolerance.
+| Phase | Scope | Acceptance |
+| --- | --- | --- |
+| 1 — Recording confidence (in progress) | Investigate overload, one-hour resource soak, acoustic drift, device switching, sleep/resume and editor playback | Decode/seek pass, resource growth is understood, physical A/V sync and failure retention checked |
+| 2 — Recording visibility | Persistent area boundary, microphone level meter, clearer disk-space warnings | Area and audio activity visible during recording; indicators excluded from capture |
+| 3 — Everyday convenience | Persist recent recordings, remember source/bar position, first-close tray explanation | Common setup survives restart without trusting stale handles or arbitrary file paths |
+| 4 — Capture preparation | Countdown, screenshot delay, region presets, window search and keyboard navigation | Selection/preparation workflows pass desktop and keyboard checks |
+| 5 — Audio quality | Limiter, optional noise gate/suppression, then separate audio tracks | Audible quality and editor-track checks pass without timing regressions |
+| 6 — Quality and efficiency | Profile CPU/GPU/memory, measured device reuse, HDR/downscaling investigation | Measured improvements preserve bounded resources and capture correctness |
+| 7 — Optional distribution | Installer lifecycle, broader hardware/Windows checks, signing/updates if requested | Repeatable installation and upgrades; public distribution remains optional |
 
-### Stage B — finish the workflows you will use
-
-Exercise area selection with keyboard and your monitor layout. Complete a local file-drop test, minimize/restore a target, and check the audio devices/output drive you normally use. If you record areas often, implement the persistent boundary next. If microphone use is common, add the level meter next.
-
-### Stage C — improve convenience
-
-Add recent recordings, remembered source/bar position, clearer first-close behavior, and any countdown/naming/auto-stop options you actually want. Each feature should have a small acceptance test instead of requiring the whole optional backlog first.
-
-### Stage D — measured optimization and advanced capture
-
-Profile the new CFR path before changing pooling or encoding policy. Improve memory/power where measurements justify it. Add HDR, per-app audio, separate tracks, or trimming only when those use cases matter to you.
-
-Public distribution can remain a separate later decision. There is no need to delay personal testing for signing, package listings, an updater service, or broad marketing polish.
+The physical device, acoustic and sleep/resume checks require an interactive hardware session;
+automated endpoint-duration checks cannot certify them. Signing, package listings and an
+updater service remain unnecessary for personal use.
 
 ## 13. Running, building, and testing the project
 

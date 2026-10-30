@@ -8,6 +8,7 @@ import { RecordBar } from "./components/RecordBar.jsx";
 import { SettingsDrawer } from "./components/SettingsDrawer.jsx";
 import { ErrorBanner } from "./components/ErrorBanner.jsx";
 import { SavedOutputCard } from "./components/SavedOutputCard.jsx";
+import { RecentRecordings } from "./components/RecentRecordings.jsx";
 import { Camera, Crop, Mic, Speaker } from "./components/Icons.jsx";
 import { shortcutHint } from "./shortcutHint.js";
 
@@ -58,6 +59,7 @@ function Panel({ rec }) {
                 </button>
               </div>
             )}
+            <RecentRecordings recordings={rec.recentRecordings} />
           </>
         )}
       </main>

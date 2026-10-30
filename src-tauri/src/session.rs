@@ -320,16 +320,12 @@ fn run(
     }
     drop(tx);
 
-    for ready in audio_ready {
-        let _ = ready.recv();
-    }
-
-    if let Some(r) = ready.take() {
-        let _ = r.send(Ok(()));
-    }
-
     #[cfg(debug_assertions)]
-    crate::selftest::inject_delay("--stall-writer-ms");
+    if with_audio {
+        if let Some(delayed) = crate::selftest::delayed_audio_preflight() {
+            audio_ready.push(delayed);
+        }
+    }
 
     // ---- writer loop
     let write = |m: Msg, writer: &mut MfWriter| -> Result<()> {
@@ -344,6 +340,17 @@ fn run(
     };
 
     let loop_result: Result<EndReason> = (|| loop {
+        // WGC has already latched the timeline and the mixer is producing PCM. Drain
+        // media while endpoints initialize: blocking on preflight here can fill the
+        // writer queue even when the encoder/disk are healthy. Keep Starting visible
+        // until every endpoint has reported its initial health (or exited).
+        if ready.is_some() && audio_preflight_complete(&mut audio_ready) {
+            if let Some(r) = ready.take() {
+                let _ = r.send(Ok(()));
+            }
+            #[cfg(debug_assertions)]
+            crate::selftest::inject_delay("--stall-writer-ms");
+        }
         check_overflow(&stats)?;
         match control_rx.try_recv() {
             Ok(Control::Stop) => return Ok(EndReason::User),
@@ -427,7 +434,17 @@ fn run(
         return Err(msg("No frames were captured"));
     }
     fin?;
+    if ready.is_some() {
+        return Err(msg("Capture ended before audio initialization completed"));
+    }
     Ok(reason)
+}
+
+fn audio_preflight_complete(pending: &mut Vec<mpsc::Receiver<()>>) -> bool {
+    // Disconnection also ends preflight: the WASAPI worker records its failure in
+    // Health before dropping the sender. A failed microphone must not block video.
+    pending.retain(|receiver| matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    pending.is_empty()
 }
 
 fn check_overflow(stats: &Stats) -> Result<()> {
@@ -485,6 +502,28 @@ fn keepalive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_preflight_polls_without_waiting_for_pending_endpoints() {
+        let (system, system_ready) = mpsc::sync_channel(1);
+        let (mic, mic_ready) = mpsc::sync_channel(1);
+        let mut pending = vec![system_ready, mic_ready];
+        assert!(!audio_preflight_complete(&mut pending));
+        mic.send(()).unwrap();
+        assert!(!audio_preflight_complete(&mut pending));
+        assert_eq!(pending.len(), 1);
+        system.send(()).unwrap();
+        assert!(audio_preflight_complete(&mut pending));
+        assert!(audio_preflight_complete(&mut pending));
+    }
+
+    #[test]
+    fn disconnected_audio_worker_also_completes_preflight() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(sender);
+        assert!(audio_preflight_complete(&mut vec![receiver]));
+        assert!(audio_preflight_complete(&mut Vec::new()));
+    }
 
     #[test]
     fn stop_does_not_wait_for_a_full_media_or_control_queue() {

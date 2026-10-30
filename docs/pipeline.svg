@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14171d"/>
+      <stop offset="100%" stop-color="#0e0f12"/>
+    </linearGradient>
+    <linearGradient id="videoGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff3b4e"/>
+      <stop offset="100%" stop-color="#ff6b7a"/>
+    </linearGradient>
+    <linearGradient id="audioGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00b074"/>
+      <stop offset="100%" stop-color="#26e09e"/>
+    </linearGradient>
+    <linearGradient id="outGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0078d4"/>
+      <stop offset="100%" stop-color="#47a5ff"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <style>
+    .header-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 15px; font-weight: 700; fill: #e8eaf0; letter-spacing: 0.5px; }
+    .title-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 13px; font-weight: 600; fill: #e8eaf0; }
+    .sub-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 11px; fill: #8a8f9c; }
+    .badge-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 10px; font-weight: 700; fill: #ffffff; }
+    .lane-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+  </style>
+
+  <!-- Container Box -->
+  <rect width="860" height="380" rx="14" fill="url(#bgGrad)" stroke="#262a32" stroke-width="1.5"/>
+
+  <!-- Top Title Bar -->
+  <circle cx="28" cy="24" r="5" fill="#ff3b4e"/>
+  <text x="44" y="28" class="header-text">OCULUS HIGH-PERFORMANCE ZERO-COPY ARCHITECTURE</text>
+  <rect x="715" y="14" width="120" height="22" rx="4" fill="#1d2027" stroke="#333842" stroke-width="1"/>
+  <text x="775" y="29" class="sub-text" text-anchor="middle" font-weight="600" fill="#ffb340">Native Windows</text>
+
+  <!-- Divider -->
+  <line x1="20" y1="46" x2="840" y2="46" stroke="#262a32" stroke-width="1"/>
+
+  <!-- === LANE 1: VIDEO PIPELINE === -->
+  <text x="32" y="74" class="lane-label" fill="#ff6b7a">Video Stream (Zero-Copy GPU)</text>
+
+  <!-- Step 1: WGC Capture -->
+  <g filter="url(#cardShadow)">
+    <rect x="30" y="86" width="220" height="96" rx="8" fill="#16181d" stroke="#2c303a" stroke-width="1.2"/>
+    <rect x="30" y="86" width="5" height="96" rx="2" fill="url(#videoGrad)"/>
+    <text x="46" y="112" class="title-text">Windows Graphics Capture</text>
+    <text x="46" y="132" class="sub-text">• Native OS compositor hook</text>
+    <text x="46" y="149" class="sub-text">• BGRA DirectX 11 textures</text>
+    <text x="46" y="166" class="sub-text">• Zero desktop CPU load</text>
+  </g>
+
+  <!-- Video Arrow 1 -->
+  <path d="M 250 134 L 285 134" stroke="#ff3b4e" stroke-width="2" stroke-dasharray="4,3"/>
+  <polygon points="289,134 282,130 282,138" fill="#ff3b4e"/>
+
+  <!-- Step 2: D3D11 Video Processor -->
+  <g filter="url(#cardShadow)">
+    <rect x="295" y="86" width="240" height="96" rx="8" fill="#16181d" stroke="#2c303a" stroke-width="1.2"/>
+    <rect x="295" y="86" width="5" height="96" rx="2" fill="url(#videoGrad)"/>
+    <text x="311" y="112" class="title-text">ID3D11VideoProcessor</text>
+    <text x="311" y="132" class="sub-text">• Single-pass crop &amp; letterbox</text>
+    <text x="311" y="149" class="sub-text">• BGRA ➔ NV12 conversion</text>
+    <text x="311" y="166" class="sub-text">• Tracked-sample GPU pool</text>
+  </g>
+
+  <!-- Video Arrow 2 -->
+  <path d="M 535 134 L 570 134" stroke="#ff3b4e" stroke-width="2"/>
+  <polygon points="574,134 567,130 567,138" fill="#ff3b4e"/>
+
+  <!-- === LANE 2: AUDIO PIPELINE === -->
+  <text x="32" y="218" class="lane-label" fill="#26e09e">Audio Streams (WASAPI + Clock Sync)</text>
+
+  <!-- Step 1: WASAPI Capture -->
+  <g filter="url(#cardShadow)">
+    <rect x="30" y="230" width="220" height="96" rx="8" fill="#16181d" stroke="#2c303a" stroke-width="1.2"/>
+    <rect x="30" y="230" width="5" height="96" rx="2" fill="url(#audioGrad)"/>
+    <text x="46" y="256" class="title-text">WASAPI Capture</text>
+    <text x="46" y="276" class="sub-text">• System loopback audio</text>
+    <text x="46" y="293" class="sub-text">• Microphone input device</text>
+    <text x="46" y="310" class="sub-text">• Independent gain &amp; live mute</text>
+  </g>
+
+  <!-- Audio Arrow 1 -->
+  <path d="M 250 278 L 285 278" stroke="#00b074" stroke-width="2" stroke-dasharray="4,3"/>
+  <polygon points="289,278 282,274 282,282" fill="#00b074"/>
+
+  <!-- Step 2: Timeline Mixer -->
+  <g filter="url(#cardShadow)">
+    <rect x="295" y="230" width="240" height="96" rx="8" fill="#16181d" stroke="#2c303a" stroke-width="1.2"/>
+    <rect x="295" y="230" width="5" height="96" rx="2" fill="url(#audioGrad)"/>
+    <text x="311" y="256" class="title-text">QPC Timeline Mixer</text>
+    <text x="311" y="276" class="sub-text">• High-precision QPC clock latch</text>
+    <text x="311" y="293" class="sub-text">• Zero-fill gap compensation</text>
+    <text x="311" y="310" class="sub-text">• Continuous A/V drift realignment</text>
+  </g>
+
+  <!-- Audio Arrow 2 -->
+  <path d="M 535 278 L 570 278" stroke="#00b074" stroke-width="2"/>
+  <polygon points="574,278 567,274 567,282" fill="#00b074"/>
+
+  <!-- === COMBINED STEP 3: ENCODING & WRITING === -->
+  <g filter="url(#cardShadow)">
+    <rect x="580" y="86" width="250" height="240" rx="8" fill="#16181d" stroke="#2c303a" stroke-width="1.2"/>
+    <rect x="580" y="86" width="5" height="240" rx="2" fill="url(#outGrad)"/>
+
+    <text x="598" y="116" class="title-text">Media Foundation SinkWriter</text>
+    <rect x="598" y="126" width="76" height="18" rx="4" fill="#262a32"/>
+    <text x="636" y="139" class="badge-text" text-anchor="middle">HARDWARE</text>
+    <rect x="682" y="126" width="62" height="18" rx="4" fill="#ff3b4e33"/>
+    <text x="713" y="139" class="badge-text" text-anchor="middle" fill="#ff6b7a">NVENC/QSV/AMF</text>
+
+    <line x1="598" y1="156" x2="810" y2="156" stroke="#262a32" stroke-width="1"/>
+
+    <text x="598" y="178" class="title-text" font-size="12">Video Encoder:</text>
+    <text x="598" y="196" class="sub-text">• Hardware H.264 &amp; HEVC (H.265)</text>
+    <text x="598" y="213" class="sub-text">• 24 to 120 FPS · CFR / VBR / CBR</text>
+
+    <text x="598" y="238" class="title-text" font-size="12">Audio Encoder:</text>
+    <text x="598" y="256" class="sub-text">• High-bitrate 48 kHz AAC</text>
+
+    <line x1="598" y1="270" x2="810" y2="270" stroke="#262a32" stroke-width="1"/>
+
+    <text x="598" y="292" class="title-text" font-size="12" fill="#47a5ff">Crash-Resilient MP4 Output</text>
+    <text x="598" y="310" class="sub-text">Fragmented MP4: fragments play on crash</text>
+  </g>
+
+  <!-- Footer Info -->
+  <text x="32" y="358" class="sub-text" fill="#656a76">Zero external binaries required • Direct DirectX 11 / Media Foundation / WASAPI OS Integration • Pure Rust backend</text>
+</svg>

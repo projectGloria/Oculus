@@ -153,6 +153,22 @@ Successful target closure is now a neutral notice, separate from errors.
 
 ### Latest local validation — 2026-10-28
 
+- [x] Phase 1 startup investigation: a debug-only five-second audio-preflight readiness gate
+      reproduced a writer overload with 298 rejected packets and a 128-packet queue peak,
+      despite maximum sample writes below 44 ms. The writer now drains media while polling
+      preflight; the same case saved 8.016667 s H.264 / 8.021333 s AAC, zero rejections and
+      a two-packet queue peak, with full decoding passing. Queue capacities remain unchanged.
+      Two focused preflight tests and the expanded full H.264/HEVC verifier pass (69 Rust tests,
+      one existing ignored test, 17 JavaScript tests, Clippy and builds). This confirms a startup
+      defect and its fix; it does not conclusively identify the earlier isolated overload.
+      Artifacts: `%TEMP%\oculus-preflight-343be8a5fc0b415cb1d22c4362e8cb82` and
+      `%TEMP%\oculus-verify-67fc9c61fa9c467c8be688e09224eb61`.
+      The fixed eight-second clip also played to the end in mpv; forward/backward seeking
+      displayed valid frames. Editor import and acoustic synchronization remain open.
+- [x] Stress tooling records OS/GPU drivers and executable SHA-256, samples output size/free
+      space, and fails safely below storage thresholds while retaining partial output/logs.
+      The one-hour result is recorded separately once completed; physical/acoustic checks stay open.
+
 - [x] Timing-reliability batch: sparse fragmented H.264 was reproducibly shorter than its audio
       timeline. H.264 now requires CFR with a separate bounded GPU repeat pool; HEVC permits optional VFR.
       Stop freezes the timeline before device teardown. The expanded verifier checks both sides of the
@@ -477,7 +493,15 @@ Successful target closure is now a neutral notice, separate from errors.
       missing shell thumbnails fall back to a media icon. Partial recordings are labeled explicitly. Rename preserves
       extensions and cannot overwrite an existing file; permanent Delete requires confirmation in the panel. Native
       screenshot/video thumbnails, rename, file-drop clipboard and pause/resume/save checks passed. P1 · M
-- [ ] **Recent recordings list** (last 10 with thumbnails) in the panel. P2 · M
+- [x] **Recent recordings list** (last 10 with thumbnails) in the panel. Rust keeps a bounded,
+      newest-first list of completed/partial recordings for the current app session, including
+      across tray WebView recreation. Expand it for thumbnails and existing file actions;
+      rename/delete update every reference. Screenshots do not evict recordings. P2 · M
+      Validation (2026-10-28): four history regression tests; 67 Rust tests passed, one existing
+      Explorer test ignored; 17 JavaScript tests passed; formatting, Clippy, frontend and debug
+      desktop builds passed. Three short H.264/system-audio UI recordings decoded; pause/resume,
+      newest-first ordering, thumbnails, expanded layout and tray recreation checked locally.
+- [ ] Persist recent recordings across app restarts, with validation of restored paths. P2 · M
 - [x] **Settings drawer**: no section headings, no "back" affordance (gear toggles), long — split into sections
       (Recording / Audio / Screenshots / Hotkeys / About). P2 · S
 - [x] **Gain sliders** show no value; add dB readout and double-click to reset. S

@@ -12,6 +12,7 @@ const INITIAL = {
   source: null,
   sourceLabel: null,
   lastSaved: null,
+  recentRecordings: [],
   error: null,
 };
 

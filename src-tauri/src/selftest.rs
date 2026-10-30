@@ -6,6 +6,7 @@
 //!        --hevc  --window <title substring>  --region x,y,w,h  --shot <out.png>
 //!        --kill-at T (hard exit after T wall seconds, without finalizing)
 //!        --stall-writer-ms N / --stall-mixer-ms N (one-time backpressure injection)
+//!        --audio-preflight-delay-ms N (delay the readiness notification, not capture)
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -32,6 +33,28 @@ pub fn inject_delay(flag: &str) {
     {
         std::thread::sleep(Duration::from_millis(ms.min(60_000)));
     }
+}
+
+/// Additional readiness gate, leaving real endpoints running so preflight latency can
+/// be tested independently of microphone availability and physical device behavior.
+pub fn delayed_audio_preflight() -> Option<mpsc::Receiver<()>> {
+    let args: Vec<String> = std::env::args().collect();
+    if !args.iter().any(|arg| arg == "--selftest") {
+        return None;
+    }
+    let ms = args
+        .iter()
+        .position(|arg| arg == "--audio-preflight-delay-ms")
+        .and_then(|index| args.get(index + 1))?
+        .parse::<u64>()
+        .ok()?
+        .min(60_000);
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(ms));
+        let _ = tx.send(());
+    });
+    Some(rx)
 }
 
 /// Exercise the real Recorder state machine, including its startup and quit callbacks.

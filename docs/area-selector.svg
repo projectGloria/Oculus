@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgMock" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#181b22"/>
+      <stop offset="100%" stop-color="#0f1115"/>
+    </linearGradient>
+    <filter id="hudShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <style>
+    .font-base { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif; }
+  </style>
+
+  <!-- Desktop Backdrop -->
+  <rect width="860" height="360" rx="12" fill="url(#bgMock)" stroke="#262a32" stroke-width="1.5"/>
+
+  <!-- Dimmed Desktop Overlay (Freeze Frame) -->
+  <rect x="20" y="20" width="820" height="320" rx="8" fill="#060709" fill-opacity="0.75" stroke="#22252d" stroke-width="1"/>
+
+  <!-- Ghost desktop windows in the background to show context -->
+  <rect x="50" y="50" width="340" height="230" rx="6" fill="#15171d" stroke="#262a32" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>
+  <rect x="420" y="80" width="380" height="220" rx="6" fill="#15171d" stroke="#262a32" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>
+
+  <!-- Selected Capture Area (Highlighted / Clear) -->
+  <rect x="180" y="65" width="500" height="210" rx="4" fill="#1b1e26" stroke="#ff3b4e" stroke-width="2"/>
+
+  <!-- Corner Handles for resize -->
+  <rect x="176" y="61" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="676" y="61" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="176" y="271" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="676" y="271" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <!-- Middle handles -->
+  <rect x="426" y="61" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="426" y="271" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="176" y="166" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+  <rect x="676" y="166" width="8" height="8" fill="#ffffff" stroke="#ff3b4e" stroke-width="1.5"/>
+
+  <!-- Inside Selected Area: Crosshair Mock -->
+  <line x1="430" y1="150" x2="430" y2="190" stroke="#ff3b4e" stroke-width="1.2" opacity="0.6"/>
+  <line x1="410" y1="170" x2="450" y2="170" stroke="#ff3b4e" stroke-width="1.2" opacity="0.6"/>
+
+  <!-- Dimension Badge HUD (Floating above top edge) -->
+  <g filter="url(#hudShadow)">
+    <rect x="375" y="32" width="110" height="26" rx="6" fill="#111317" stroke="#333842" stroke-width="1"/>
+    <text x="430" y="49" class="font-base" font-size="12" font-weight="700" fill="#e8eaf0" text-anchor="middle">1280 × 720</text>
+  </g>
+
+  <!-- Interactive Controls Tooltip HUD (Bottom Center) -->
+  <g filter="url(#hudShadow)">
+    <rect x="160" y="295" width="540" height="34" rx="8" fill="#111317" stroke="#2c303a" stroke-width="1.2"/>
+
+    <!-- Key cues -->
+    <text x="180" y="316" class="font-base" font-size="11" fill="#8a8f9c">
+      <tspan fill="#ff3b4e" font-weight="600">Enter</tspan> Confirm  •  
+      <tspan fill="#ff3b4e" font-weight="600">Arrows</tspan> Nudge 1px  •  
+      <tspan fill="#ff3b4e" font-weight="600">Shift+Arrows</tspan> 10px  •  
+      <tspan fill="#ff3b4e" font-weight="600">Space</tspan> Move  •  
+      <tspan fill="#ff3b4e" font-weight="600">Esc</tspan> Cancel
+    </text>
+  </g>
+
+  <!-- Floating Screenshot Saved Preview Pill (Top Right) -->
+  <g filter="url(#hudShadow)">
+    <rect x="630" y="30" width="190" height="60" rx="8" fill="#16181d" stroke="#262a32" stroke-width="1"/>
+    <rect x="640" y="40" width="40" height="40" rx="4" fill="#222630" stroke="#ff3b4e" stroke-width="1"/>
+    <!-- Tiny icon in thumbnail -->
+    <circle cx="660" cy="60" r="10" fill="#ff3b4e" opacity="0.8"/>
+    <text x="690" y="52" class="font-base" font-size="11" font-weight="700" fill="#e8eaf0">Screenshot Saved</text>
+    <text x="690" y="68" class="font-base" font-size="10" fill="#8a8f9c">Click or drag file</text>
+    <circle cx="806" cy="42" r="6" fill="#262a32"/>
+    <text x="806" y="45" class="font-base" font-size="9" fill="#8a8f9c" text-anchor="middle">×</text>
+  </g>
+</svg>

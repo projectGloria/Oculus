@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, fileName, formatElapsed } from "../api.js";
 import { Camera, Play } from "./Icons.jsx";
 import { ErrorBanner } from "./ErrorBanner.jsx";
 import { useFileDrag } from "../hooks/useFileDrag.js";
 
-export function SavedOutputCard({ output }) {
+export function SavedOutputCard({ output, announce = true }) {
+  const nameId = useId();
   const [details, setDetails] = useState(null);
   const [detailsFailed, setDetailsFailed] = useState(false);
   const [error, setError] = useState(null);
@@ -46,7 +47,7 @@ export function SavedOutputCard({ output }) {
           {details?.thumbnail ? <img src={details.thumbnail} alt="" draggable={false} /> : screenshot ? <Camera /> : <Play />}
         </button>
         <div className="saved-info">
-          <p className="saved-label" role="status">{label}</p>
+          <p className="saved-label" role={announce ? "status" : undefined}>{label}</p>
           <p className="ellipsis saved-name" title={output.path}>{name}</p>
           <p className="muted">
             {output.durationMs != null && `${formatElapsed(output.durationMs)} · `}
@@ -63,8 +64,8 @@ export function SavedOutputCard({ output }) {
       </div>
       {editing === "rename" && (
         <form className="saved-edit" onSubmit={(e) => { e.preventDefault(); if (!busy) action("rename saved file", () => api.renameSavedFile(output.path, draft)); }}>
-          <label htmlFor="saved-name">Filename (extension stays the same)</label>
-          <input id="saved-name" ref={editControl} value={draft} maxLength={180} onChange={(e) => setDraft(e.target.value)} disabled={busy} />
+          <label htmlFor={nameId}>Filename (extension stays the same)</label>
+          <input id={nameId} ref={editControl} value={draft} maxLength={180} onChange={(e) => setDraft(e.target.value)} disabled={busy} />
           <div className="saved-actions">
             <button className="link" type="submit" disabled={busy || !draft.trim()}>Save name</button>
             <button className="link" type="button" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>

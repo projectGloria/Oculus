@@ -68,6 +68,12 @@ try {
     $normalPath = Join-Path $outputDir "normal.mp4"
     Invoke-Checked $exePath @("--selftest", $normalPath, "--secs", "8", "--pause", "2,3", "--sys", "--mic")
     Assert-Media $normalPath "h264" 4
+    # The capture clock and mixer are active during endpoint preflight. A slow device
+    # must not fill the media queue while an otherwise healthy writer waits for it.
+    $preflightPath = Join-Path $outputDir "slow-audio-preflight.mp4"
+    Invoke-Checked $exePath @("--selftest", $preflightPath, "--secs", "3", "--sys", "--mic",
+        "--audio-preflight-delay-ms", "5000")
+    Assert-Media $preflightPath "h264" 7
     $pausedStopPath = Join-Path $outputDir "stop-while-paused.mp4"
     Invoke-Checked $exePath @("--selftest", $pausedStopPath, "--secs", "3", "--pause", "1,30", "--sys", "--mic")
     Assert-Media $pausedStopPath "h264" 0.5

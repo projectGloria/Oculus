@@ -60,6 +60,7 @@ pub struct Snapshot {
     pub last_saved: Option<String>,
     pub saved_output: Option<SavedOutput>,
     pub last_screenshot: Option<SavedOutput>,
+    pub recent_recordings: Vec<SavedOutput>,
     pub error: Option<String>,
     pub audio: crate::audio::wasapi::Health,
     pub system_muted: bool,
@@ -85,6 +86,7 @@ struct Inner {
     last_saved: Option<String>,
     saved_output: Option<SavedOutput>,
     last_screenshot: Option<SavedOutput>,
+    recent_recordings: Vec<SavedOutput>,
     error: Option<String>,
     notice: Option<String>,
     hotkey_errors: Vec<String>,
@@ -94,6 +96,42 @@ struct Inner {
     frames_at_tick: u64,
     /// Bumped per session so a stale tick thread exits instead of ticking the next one.
     generation: u64,
+}
+
+impl Inner {
+    fn remember_recording(&mut self, saved: SavedOutput) {
+        self.recent_recordings.retain(|entry| entry.path != saved.path);
+        self.recent_recordings.insert(0, saved.clone());
+        self.recent_recordings.truncate(10);
+        self.last_saved = Some(saved.path.clone());
+        self.saved_output = Some(saved);
+    }
+
+    fn update_output(&mut self, old: &str, path: Option<String>) {
+        for saved in [&mut self.saved_output, &mut self.last_screenshot] {
+            if saved.as_ref().is_some_and(|s| s.path == old) {
+                if let Some(path) = &path {
+                    saved.as_mut().unwrap().path = path.clone();
+                } else {
+                    *saved = None;
+                }
+            }
+        }
+        self.recent_recordings.retain_mut(|saved| {
+            if saved.path != old {
+                return true;
+            }
+            if let Some(path) = &path {
+                saved.path = path.clone();
+                true
+            } else {
+                false
+            }
+        });
+        if self.last_saved.as_deref() == Some(old) {
+            self.last_saved = path;
+        }
+    }
 }
 
 #[derive(Default)]
@@ -131,6 +169,7 @@ impl Recorder {
             last_saved: i.last_saved.clone(),
             saved_output: i.saved_output.clone(),
             last_screenshot: i.last_screenshot.clone(),
+            recent_recordings: i.recent_recordings.clone(),
             error: i.error.clone(),
             audio: i
                 .session
@@ -244,26 +283,15 @@ impl Recorder {
         i.saved_output
             .iter()
             .chain(i.last_screenshot.iter())
+            .chain(i.recent_recordings.iter())
             .find(|s| s.path == path)
             .cloned()
-            .ok_or_else(|| msg("This file is no longer the current saved output"))
+            .ok_or_else(|| msg("This file is no longer a remembered saved output"))
     }
 
     pub fn update_saved_output(&self, app: &AppHandle, old: &str, path: Option<String>) {
         let mut i = self.inner.lock().unwrap();
-        let Inner { saved_output, last_screenshot, .. } = &mut *i;
-        for saved in [saved_output, last_screenshot] {
-            if saved.as_ref().is_some_and(|s| s.path == old) {
-                if let Some(path) = &path {
-                    saved.as_mut().unwrap().path = path.clone();
-                } else {
-                    *saved = None;
-                }
-            }
-        }
-        if i.last_saved.as_deref() == Some(old) {
-            i.last_saved = path;
-        }
+        i.update_output(old, path);
         self.emit(app, &i);
     }
 
@@ -406,10 +434,12 @@ impl Recorder {
         }
         i.cancelled_start = i.cancel_start;
         i.cancel_start = false;
+        // The writer drains frames during audio preflight. Start FPS sampling at
+        // commit so those startup frames do not inflate the first one-second tick.
+        i.frames_at_tick = handle.stats.frames.load(Ordering::Relaxed);
         i.session = Some(handle);
         i.error = None;
         i.fps = 0;
-        i.frames_at_tick = 0;
         self.emit(app, &i);
         drop(i);
         let _ = committed_tx.send(());
@@ -531,8 +561,7 @@ impl Recorder {
         } else {
             match o.result {
                 Ok(()) => {
-                    i.last_saved = Some(o.path.to_string_lossy().into_owned());
-                    i.saved_output = Some(SavedOutput {
+                    i.remember_recording(SavedOutput {
                         path: o.path.to_string_lossy().into_owned(),
                         kind: "recording",
                         duration_ms: Some(o.duration_ms),
@@ -544,8 +573,7 @@ impl Recorder {
                     }
                 }
                 Err(e) => {
-                    i.last_saved = Some(o.path.to_string_lossy().into_owned());
-                    i.saved_output = Some(SavedOutput {
+                    i.remember_recording(SavedOutput {
                         path: o.path.to_string_lossy().into_owned(),
                         kind: "recording",
                         duration_ms: Some(o.duration_ms),
@@ -672,5 +700,81 @@ mod tests {
         assert!(recorder.saved_output("C:/out/shot.png").is_ok());
         assert!(recorder.saved_output("C:/out/other.mp4").is_err());
         assert!(recorder.saved_output("C:/out/../private.exe").is_err());
+    }
+
+    fn recording(path: &str, complete: bool) -> SavedOutput {
+        SavedOutput { path: path.into(), kind: "recording", duration_ms: Some(1500), complete }
+    }
+
+    #[test]
+    fn recent_recordings_are_bounded_newest_first_and_authorized() {
+        let recorder = Recorder::default();
+        {
+            let mut i = recorder.inner.lock().unwrap();
+            for n in 0..12 {
+                i.remember_recording(recording(&format!("C:/out/{n}.mp4"), n != 11));
+            }
+            // A screenshot replaces the latest card without losing video history.
+            i.saved_output = Some(SavedOutput {
+                path: "C:/out/shot.png".into(),
+                kind: "screenshot",
+                duration_ms: None,
+                complete: true,
+            });
+        }
+        let snapshot = recorder.get();
+        assert_eq!(snapshot.recent_recordings.len(), 10);
+        assert_eq!(snapshot.recent_recordings[0].path, "C:/out/11.mp4");
+        assert!(!snapshot.recent_recordings[0].complete);
+        assert_eq!(snapshot.recent_recordings[9].path, "C:/out/2.mp4");
+        assert!(recorder.saved_output("C:/out/2.mp4").is_ok());
+        assert!(recorder.saved_output("C:/out/1.mp4").is_err());
+        assert_eq!(serde_json::to_value(snapshot).unwrap()["recentRecordings"].as_array().unwrap().len(), 10);
+    }
+
+    #[test]
+    fn recent_rename_and_delete_update_all_references() {
+        let recorder = Recorder::default();
+        {
+            let mut i = recorder.inner.lock().unwrap();
+            i.remember_recording(recording("old.mp4", true));
+            i.update_output("old.mp4", Some("new.mp4".into()));
+        }
+        assert!(recorder.saved_output("old.mp4").is_err());
+        assert!(recorder.saved_output("new.mp4").is_ok());
+        assert_eq!(recorder.get().last_saved.as_deref(), Some("new.mp4"));
+        {
+            let mut i = recorder.inner.lock().unwrap();
+            i.update_output("new.mp4", None);
+        }
+        assert!(recorder.saved_output("new.mp4").is_err());
+        let snapshot = recorder.get();
+        assert!(snapshot.recent_recordings.is_empty());
+        assert!(snapshot.saved_output.is_none());
+        assert!(snapshot.last_saved.is_none());
+    }
+
+    #[test]
+    fn remembering_a_recording_does_not_duplicate_its_path() {
+        let mut i = Inner::default();
+        i.remember_recording(recording("one.mp4", false));
+        i.remember_recording(recording("two.mp4", true));
+        i.remember_recording(recording("one.mp4", true));
+        assert_eq!(i.recent_recordings.len(), 2);
+        assert_eq!(i.recent_recordings[0].path, "one.mp4");
+        assert!(i.recent_recordings[0].complete);
+    }
+
+    #[test]
+    fn editing_history_preserves_a_different_latest_output() {
+        let mut i = Inner::default();
+        i.remember_recording(recording("older.mp4", true));
+        i.remember_recording(recording("latest.mp4", true));
+        i.update_output("older.mp4", Some("renamed.mp4".into()));
+        assert_eq!(i.recent_recordings[1].path, "renamed.mp4");
+        i.update_output("renamed.mp4", None);
+        assert_eq!(i.recent_recordings.len(), 1);
+        assert_eq!(i.saved_output.as_ref().unwrap().path, "latest.mp4");
+        assert_eq!(i.last_saved.as_deref(), Some("latest.mp4"));
     }
 }
