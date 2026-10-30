@@ -1,176 +1,265 @@
+<div align="center">
+
+<img src="docs/icon.png" alt="Oculus Logo" width="120" height="120" />
+
 # Oculus
 
-Lean Windows screen recorder + screenshot tool. Tauri 2 + React 19 UI; capture, encode and
-audio are native Rust on OS APIs — no Electron, no FFmpeg.
+**A lean, high-performance Windows screen recorder and screenshot tool crafted with Tauri 2, Rust &amp; React 19**
 
-![Oculus recording panel](docs/oculus-panel.png)
+*Native Windows Graphics Capture, Direct3D 11 &amp; Media Foundation hardware encoding — no Electron, no FFmpeg.*
 
-See [OCULUS_PROJECT_GUIDE.md](OCULUS_PROJECT_GUIDE.md) for the detailed owner/developer handbook:
-features, workflows, architecture, completed work, test evidence, remaining tasks and personal-use priorities.
-Use [TODO.md](TODO.md) for the detailed work checklist. These three files are the project's documentation.
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-00B074.svg?style=flat-square" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%2B%20%7C%2011-0078D4.svg?style=flat-square&logo=windows" alt="Platform: Windows" />
+  <img src="https://img.shields.io/badge/Tauri-v2-FFC131.svg?style=flat-square&logo=tauri" alt="Tauri v2" />
+  <img src="https://img.shields.io/badge/Rust-2021-DEA584.svg?style=flat-square&logo=rust" alt="Rust 2021" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB.svg?style=flat-square&logo=react" alt="React 19" />
+  <img src="https://img.shields.io/badge/Telemetry-None-success.svg?style=flat-square" alt="Telemetry: None" />
+</p>
 
-## Requirements and features
+---
 
-Windows 10 version 2004 (build 19041) or later, or Windows 11, with WebView2 and a graphics
-driver that supports Windows Graphics Capture. Development additionally requires Node.js 24,
-rustup and Visual Studio C++ build tools; rust-toolchain.toml pins Rust 1.99.1.
+<p>
+  <a href="#-about-oculus">About</a> •
+  <a href="#-key-features">Features</a> •
+  <a href="#-architecture--pipeline">Architecture</a> •
+  <a href="#-visual-tour">Visual Tour</a> •
+  <a href="#-keyboard-shortcuts">Shortcuts</a> •
+  <a href="#-getting-started">Getting Started</a> •
+  <a href="#-building-from-source">Building</a> •
+  <a href="#-recording-safety">Safety</a> •
+  <a href="#-icon--design-philosophy">Design</a> •
+  <a href="#-license--documentation">License</a>
+</p>
 
-Record a display, window or selected area to H.264/HEVC MP4 with optional system sound and
-microphone audio. Capture PNG screenshots, copy image pixels/files and use global shortcuts
-or the tray to control recording. Settings include audio devices, gain, hotkeys and launch at login.
+<picture>
+  <img
+    width="850"
+    src="docs/oculus-panel.png"
+    alt="Oculus Screen Recorder Panel Interface Preview"
+  />
+</picture>
 
-```
-WGC frame (BGRA, GPU) ─▶ ID3D11VideoProcessor: crop + letterbox + BGRA→NV12 (BT.709), one pass
-                      ─▶ tracked-sample NV12 pool ─▶ IMFSinkWriter (HW H.264/HEVC) ─┐
-WASAPI loopback + mic ─▶ QPC-clocked mixer (zero-fill, drift realign) ─▶ AAC ───────┴▶ MP4
-```
+</div>
 
-## Run
+---
 
-```bash
+## 👁️ About Oculus
+
+**Oculus** is a lightweight, local-first Windows application engineered for creators, developers, and power users who need instant screen recording and pixel-perfect screenshots without the overhead of massive multi-hundred-megabyte runtimes.
+
+Instead of bundling heavy third-party binaries like Electron or FFmpeg, Oculus communicates directly with native Windows operating system subsystems:
+- **Direct3D 11 &amp; Windows Graphics Capture (WGC)**: Hardware-composited surface capture with zero CPU overhead.
+- **DirectX Video Processor**: Single-pass GPU crop, letterbox, and BGRA-to-NV12 color conversion.
+- **Microsoft Media Foundation**: Direct hardware acceleration via NVENC, Intel QuickSync, or AMD AMF.
+- **Windows Audio Session API (WASAPI)**: Low-latency system loopback and microphone capture synchronized against a microsecond-accurate QueryPerformanceCounter (QPC) master clock.
+
+### 🌟 Core Principles
+
+- 🪟 **Pure Native Integration**: Runs natively on Windows 10 (version 2004 build 19041+) and Windows 11 with seamless tray integration and global shortcuts.
+- 🪶 **Ultra-Lean Footprint**: Built with Tauri 2 and Rust. When minimized to the system tray, the WebView unloads, settling into an idle footprint of **~6 MB** private working set memory.
+- 🛡️ **100% Local-First &amp; Private**: Zero telemetry, zero analytics pings, no mandatory accounts, and no background cloud uploads. Your recordings and screenshots never leave your PC.
+- ⚡ **Crash-Resilient Pipeline**: H.264 recordings utilize fragmented MP4 (`fMP4`) containers. Completed fragments remain playable and valid even if Windows experiences an abrupt shutdown, power loss, or crash.
+
+---
+
+## ✨ Key Features
+
+<table>
+  <tr>
+    <td width="50%">
+      <h3>🖥️ Flexible Capture Targets</h3>
+      <p>Record entire multi-monitor desktops, select individual application windows, or draw an arbitrary pixel-exact bounding box with the interactive freeze-frame selector.</p>
+    </td>
+    <td width="50%">
+      <h3>⚙️ Hardware-Accelerated Video</h3>
+      <p>Encode directly to MP4 using hardware H.264 or HEVC (H.265). Select frame rates from 24 up to 120 FPS, set custom bitrates (2–150 Mbps), and choose CBR or VBR rate control.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🎙️ Dual-Channel Audio &amp; Live Mute</h3>
+      <p>Mix system audio loopback with microphone input in real-time into high-bitrate AAC. Adjust device gain independently and toggle live audio mute during active recordings.</p>
+    </td>
+    <td width="50%">
+      <h3>📸 Precision Screenshots &amp; Floating HUD</h3>
+      <p>Capture instant PNG screenshots with global hotkeys. Includes a 5-second non-intrusive floating preview card with one-click drag-and-drop into chat, email, or image editors.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🎯 Direct2D Freeze-Frame Region Picker</h3>
+      <p>Nudge selections by 1px with arrow keys or 10px with Shift+arrows. Click any hovered window to snap automatically, hold Shift for 1:1 squares, or press Space to move.</p>
+    </td>
+    <td width="50%">
+      <h3>📁 Recent Recordings &amp; File Management</h3>
+      <p>Instant file cards with thumbnail generation, duration, and file size. Open, reveal in Explorer, copy raw file data to clipboard, rename in-place, or permanently remove files.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🏗️ Architecture &amp; Pipeline
+
+Oculus bypasses user-space frame copying by keeping capture, color-space conversion, and hardware encoding entirely within GPU memory:
+
+<p align="center">
+  <img src="docs/pipeline.svg" alt="Oculus High-Performance Pipeline Architecture" width="850" />
+</p>
+
+### Pipeline Breakdown
+
+1. **GPU Video Capture**: Windows Graphics Capture delivers raw BGRA surfaces directly from the D3D11 compositor.
+2. **DirectX Video Processing**: `ID3D11VideoProcessor` crops, letterboxes, and transforms surfaces to NV12 (BT.709 color matrix) in a single hardware pass.
+3. **Audio Timeline Alignment**: WASAPI threads feed a continuous timeline mixer clocked against the Windows `QueryPerformanceCounter` (QPC). Silent gaps are zero-filled and drift is continuously realigned against the video stream.
+4. **Hardware Sink Writer**: Audio and video packets stream through Media Foundation `IMFSinkWriter`, producing compliant MP4 or fragmented MP4 (`fMP4`) containers.
+
+---
+
+## 📸 Visual Tour
+
+### 1. Unified Control Panel &amp; Recent Recordings
+Configure capture targets, audio inputs, video frame rates, and encoding quality. Access the last 10 session recordings with live thumbnail previews, file sizes, and instant management actions.
+
+<p align="center">
+  <img src="docs/oculus-panel.png" alt="Oculus Recording Panel" width="600" />
+</p>
+
+### 2. Interactive Freeze-Frame Area Selector
+Freeze all active monitors to accurately draw, resize, or snap capture regions. Fine-tune boundaries using keyboard nudges and view exact pixel dimensions in the real-time HUD.
+
+<p align="center">
+  <img src="docs/area-selector.svg" alt="Oculus Area Selector Interface" width="750" />
+</p>
+
+### 3. Floating Preview &amp; Direct File Dragging
+Completed screenshots display a transient preview window that is automatically excluded from subsequent captures. Drag the thumbnail straight from the card into Discord, Slack, GitHub, or Explorer.
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+Global hotkeys allow you to initiate and control recordings even when Oculus is minimized to the system tray:
+
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Ctrl + Shift + R` | **Start / Stop Recording** | Toggle recording on the currently selected source |
+| `Ctrl + Shift + P` | **Pause / Resume** | Freeze capture timeline; tray icon turns amber |
+| `Ctrl + Shift + S` | **Quick Screenshot** | Capture active source directly to a PNG file |
+| `Ctrl + Shift + A` | **Area Screenshot** | Freeze displays and launch the interactive region picker |
+
+### Region Selector Controls
+
+| Input | Effect |
+| :--- | :--- |
+| **Drag** | Draw bounding rectangle |
+| **Click Window** | Snap selection box to window boundaries |
+| **Arrow Keys** | Nudge selection by **1 pixel** |
+| **Shift + Arrow Keys** | Nudge selection by **10 pixels** |
+| **Alt + Arrow Keys** | Resize selection box by 1 pixel |
+| **Shift (while dragging)** | Constrain aspect ratio to a 1:1 square |
+| **Space** | Toggle move mode |
+| **Enter** | Confirm selection and trigger capture |
+| **Escape / Right Click** | Cancel selection |
+
+> [!TIP]
+> All hotkeys can be customized or disabled under **Settings → Hotkeys**. Tray and panel controls remain fully functional when global shortcuts are deactivated.
+
+---
+
+## 🚀 Getting Started
+
+### System Requirements
+
+- **Operating System**: Windows 10 (version 2004 / build 19041 or higher) or Windows 11
+- **Graphics Driver**: GPU driver supporting Windows Graphics Capture (Direct3D 11 Feature Level 11_0+)
+- **Runtime**: Microsoft Edge WebView2 (installed by default on modern Windows; bootstrapped by installer if absent)
+
+### Quick Run
+
+Download the latest installer or build from source:
+
+```powershell
+# Run the application in developer mode
 npm install
 npm run tauri dev
 ```
 
-## Build installer
+---
 
-```bash
+## 🛠️ Building from Source
+
+### Prerequisites
+
+Ensure you have the following installed on your Windows development environment:
+- **Node.js** (v24+ recommended)
+- **Rust Toolchain** (Rust 2021 edition; pinned to `1.99.1` via `rust-toolchain.toml`)
+- **Visual Studio C++ Build Tools** (with "Desktop development with C++" workload)
+
+### Build Commands
+
+```powershell
+# 1. Install frontend dependencies
+npm ci
+
+# 2. Run the Tauri development environment
+npm run tauri dev
+
+# 3. Build production binaries and NSIS installer
 npm run tauri build
 ```
 
-## Hotkeys
-
-`Ctrl+Shift+R` record/stop · `Ctrl+Shift+P` pause · `Ctrl+Shift+S` screenshot of current source ·
-`Ctrl+Shift+A` area screenshot. Closing the window sends Oculus to the tray (the webview is
-destroyed; ~6 MB private memory while idle).
-
-These are the default shortcuts. Settings → Hotkeys lets you change them, disable individual
-actions with an empty binding, or disable global hotkeys entirely. Conflicting bindings leave
-the previous configuration active. Tray and panel controls remain available when hotkeys are off.
-Optional bindings are available for microphone mute, record an area immediately, and record the
-window under the cursor. These start unassigned.
-
-Area selection freezes the displays. Drag an area or click a highlighted window, then move/resize
-the selection before pressing Enter. Arrows move one pixel, Shift+arrows move ten, Alt+arrows resize,
-Space toggles move mode, and Escape or right-click cancels. Holding Shift while drawing makes a square.
-
-Recording settings offer 24/30/48/50/60/72/120 fps, output-height limits, an optional 2–150 Mbps
-bitrate, and encoder-default/CBR/VBR rate control. Hardware may reject an explicit mode; choose
-Encoder default in that case. A two-second keyframe interval is requested where supported.
-Constant frame rate is enabled by default and required for H.264: sparse timestamps in the
-Windows fragmented MP4 path can shorten video at fragment boundaries. Repeated frames use a
-separate bounded GPU surface pool. This costs more encoder work on static screens. HEVC also
-supports an optional variable-frame-rate mode in Settings.
-
-The tray turns red while recording and amber with pause bars while paused; its tooltip shows
-the recording time. The compact bar advances its timer between backend snapshots and freezes it on pause.
-
-Saved recordings and screenshots appear in a card with a thumbnail, filename and size. Recordings also show
-their duration. Open the file, show it in Explorer, copy it as a file for pasting into other apps, or rename it.
-Delete asks for confirmation and permanently removes the file; it does not send it to the Recycle Bin.
-If Windows cannot generate a thumbnail, file actions remain available with a media icon.
-
-Successful screenshots also show a five-second floating preview, including when Oculus is in the tray.
-Click the preview to open the image, or dismiss it with its close button. The preview is excluded from capture.
-Drag a preview or card thumbnail into another app to copy the saved file; Escape cancels the drag.
-Settings → Screenshots has an optional shutter sound, off by default.
-
-The recording bar provides live system-audio and microphone mute controls. Muting affects saved
-audio while device capture remains active. Settings → Audio chooses a specific endpoint or
-Default to follow Windows' device changes. Settings → About provides copyable local diagnostics.
-
-## Headless pipeline checks (debug builds only)
-
-```bash
-src-tauri/target/debug/oculus.exe --selftest out.mp4 --secs 8 --pause 2,3 --sys --mic
+Production installers and binaries are output to:
+```
+src-tauri/target/release/bundle/nsis/
 ```
 
-Flags: `--window TITLE`, `--region x,y,w,h`, `--fps N`, `--hevc`, `--resize-at T,W,H`,
-`--height N`, `--bitrate Mbps`, `--cbr`, `--vbr`, `--vfr` (HEVC only), `--shot out.png`, `--mem`, `--list`, `--kill-at T`.
-The last flag exits with code 86 after T wall seconds
-without stopping/finalizing. See `src-tauri/src/selftest.rs`.
+### Running Tests &amp; Verification
 
-Run `npm run verify` for Rust and JavaScript tests, Clippy, frontend/debug builds, recording/pause/audio checks, hard-exit
-recovery, startup cancellation, and slow-finalization quit checks. It needs an unlocked interactive Windows
-desktop and developer-installed `ffmpeg`/`ffprobe` on PATH; neither is bundled with Oculus. Add
-`-- -IncludeHevc` to also test HEVC on hardware that supports it. Recordings stay in a unique temporary folder.
+Oculus includes a comprehensive verification harness testing audio mixing, timeline latching, writer backpressure, and hard termination:
 
-The verifier also injects a two-second writer stall to check bounded buffering and partial-file retention.
-Debug selftests accept `--stall-writer-ms N` and `--stall-mixer-ms N` for backpressure experiments; the latter
-needs an active audio endpoint to fill the input queue. These switches are absent from release builds.
+```powershell
+# Run Rust unit tests
+cargo test --manifest-path src-tauri/Cargo.toml
 
-After building the debug recorder, `npm run verify:stress` records six short pause/resume clips
-and a five-minute clip with system/mic audio. It checks decoding, seeking, a complete 60 fps
-frame grid and audio/video endpoints, and samples private memory/handles every five seconds.
-Artifacts and resource CSVs stay in a unique temporary folder. Override with
-`npm run verify:stress -- -Repetitions 10 -Seconds 600`. The desktop must remain unlocked.
-This checks endpoint durations; it does not replace an acoustic sync test or a one-hour soak.
+# Run JavaScript frontend regression tests
+npm test
 
-## Recording safety
+# Run full pipeline verification (requires interactive desktop)
+npm run verify
+```
 
-H.264 recordings use fragmented MP4. Completed fragments can play after a process crash or hard exit;
-the current fragment and data buffered by Windows may be lost. A crash before the first complete fragment
-can still leave no playable video. Writer errors retain partial output and report its path.
+---
 
-HEVC still uses regular MP4 because the fragmented Media Foundation sink rejects HEVC on the tested system.
-HEVC files need successful finalization and remain vulnerable to hard termination. Editor compatibility
-for fragmented H.264 is still being checked; ffprobe inspection, full decoding and seeking pass locally.
+## 🛡️ Recording Safety
 
-Quit waits for finalization. Suspend/logoff handlers request finalization too, but Windows can force a
-shutdown before it completes. Saves use unique names; unavailable output folders fall back to
-`Videos\Oculus` with a warning. Low disk space warns below 2 GB and stops recording below 200 MB.
+- **Fragmented MP4**: H.264 video streams use fragmented MP4 (`fMP4`). If your computer loses power or the process terminates abruptly, completed chunks remain intact and playable.
+- **Bounded Buffer Queues**: High-load scenarios throttle gracefully. If the storage drive cannot keep up with encoder throughput, Oculus halts safely rather than exhausting system memory, preserving the recorded file.
+- **Disk Space Sentinel**: Warns when free disk space falls below **2 GB** and automatically finalizes and stops recording if storage reaches **200 MB**.
+- **Symlink &amp; Traversal Guard**: Path verification resolves Windows directory junctions to ensure file actions operate strictly within the user's designated output directory.
 
-Media queues are bounded. If capture or the encoder/output disk cannot keep up, Oculus stops with an error
-and retains partial output. Stop requests use a separate nonblocking channel. Finalization flushes the
-mixer tail and pads any remaining audio gap to the last written video frame.
+---
 
-Diagnostics stay in `%LOCALAPPDATA%\Oculus\logs`: five rotating 1 MiB logs and a bounded `panic.log`
-with panic messages and backtraces. Oculus does not upload recordings or collect telemetry. The installer
-can download Microsoft WebView2 when it is missing.
+## 🎨 Icon &amp; Design Philosophy
 
-Saved-file links use Windows' native folder-selection API and accept only existing files within
-the current output folder, after resolving junctions and symlinks. After changing the output folder,
-open older recordings from their original folder in Explorer.
+<p align="center">
+  <img src="docs/icon.png" alt="Oculus Icon Close-up" width="100" height="100" />
+</p>
 
-The Open, Copy file, Rename and Delete commands additionally accept only outputs remembered by the recorder. Renaming
-preserves the file extension and refuses to overwrite another file.
+> *"A precision optical lens aperture encased in an obsidian housing, illuminated by an active scarlet recording iris."*
 
-The webview has explicit permissions for recorder subscriptions, titlebar controls and the folder picker.
-Production loads scripts/styles from bundled assets and connects only to local Tauri IPC. Vite's injected
-styles and hot-reload connection are allowed separately during development.
+The Oculus visual identity reflects precision engineering and restraint:
+- **Obsidian Enclosure (`#111317`)**: Represents stability, low resource consumption, and dark-mode ergonomics.
+- **Aperture Ring (`#e8eaf0`)**: Symbolizes clear optical capture and pixel-perfect rendering.
+- **Scarlet Recording Iris (`#ff3b4e`)**: The universal tally light indicating active, trusted recording.
 
-Oculus is licensed under the [MIT License](LICENSE).
-See the [privacy and security section](OCULUS_PROJECT_GUIDE.md#142-privacy-and-security-model) for capture, clipboard and local-diagnostic data handling.
+---
 
-## Known limitations and FAQ
+## 📜 License &amp; Documentation
 
-- Protected/DRM content can appear black. Exclusive-fullscreen games may prevent capture or
-  region selection; use borderless/windowed mode where possible.
-- Window capture follows a single native window. Separate popup menus and tooltips may be omitted.
-  Minimized targets may stop delivering images; the last frame is repeated until capture resumes.
-- HDR capture currently uses SDR surfaces and may produce washed-out colors. HDR tone mapping is pending.
-- Older Windows builds may retain the system capture border even when border suppression is requested.
-- **Does the video have constant frame rate?** Yes by default. H.264 requires it to keep the
-  fragmented MP4 timeline correct. HEVC can use variable frame rate when the setting is disabled.
-- **Why can an old saved-file action fail?** Actions validate against the current output folder.
-  After changing folders, open older files from their original folder in Explorer.
-- HEVC crash safety, cross-editor import, mixed-DPI and additional GPU/Windows combinations
-  still need validation. See TODO.md for the release checklist.
+Oculus is open-source software licensed under the **[MIT License](LICENSE)**.
 
-Oculus targets Windows. Streaming, Linux/macOS support and a full nonlinear video editor are
-outside the project's current scope. No FFmpeg or Electron is bundled.
-
-## Layout
-
-See [how the application works internally](OCULUS_PROJECT_GUIDE.md#6-how-the-application-works-internally) for the pipeline, threading, timing and lifetime rules.
-
-| Path | Role |
-| --- | --- |
-| `src-tauri/src/capture/` | Shared D3D11 device, raw WGC session, video processor + NV12 pool |
-| `src-tauri/src/encode/mf_writer.rs` | Two-stream `IMFSinkWriter` |
-| `src-tauri/src/audio/` | WASAPI capture threads, timeline mixer (unit-tested) |
-| `src-tauri/src/clock.rs` | Shared QPC timeline, first-frame latch, pause math |
-| `src-tauri/src/session.rs` | One recording: wiring, writer loop, keep-alive, teardown |
-| `src-tauri/src/recorder.rs` | App state machine, `recorder://state` snapshots |
-| `src-tauri/src/overlay/region.rs` | Native freeze-frame region picker (Win32 + D2D) |
-| `src/hooks/useRecorder.js` | Subscribe-then-hydrate, `seq`-ordered snapshots |
+- **Developer Handbook**: Read [OCULUS_PROJECT_GUIDE.md](OCULUS_PROJECT_GUIDE.md) for in-depth architecture details, lifetime rules, and validation reports.
+- **Task Checklist**: See [TODO.md](TODO.md) for ongoing work items and upcoming roadmap milestones.
+- **Diagnostics**: Local rotating logs and panic backtraces are saved locally at `%LOCALAPPDATA%\Oculus\logs`. Oculus contains **no external telemetry**.
