@@ -334,8 +334,10 @@ The writer media queue holds at most 128 packets; audio input holds at most 64. 
 The writer drains media while polling audio preflight notifications. Capture and the mixer
 already run at this point, so waiting synchronously for a slow endpoint would fill the writer
 queue even with a healthy encoder. Starting remains visible until all initial audio health
-notifications arrive or their workers exit. Ending capture before that point reports a startup
-failure instead of committing an already-ended session.
+notifications arrive or their workers exit, for at most 10 seconds: after that deadline any
+endpoint still opening is reported failed and the session commits, so Stop, quit and the
+disk-space check are never held off by an unresponsive device. Ending capture before that point
+reports a startup failure instead of committing an already-ended session.
 
 New output filenames are reserved atomically with collision suffixes. Failed startup cleans up its placeholder. Runtime recording failures retain partial output and report its location.
 

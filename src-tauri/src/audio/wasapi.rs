@@ -53,6 +53,18 @@ impl Health {
             Source::Mic => self.mic = status,
         }
     }
+
+    /// Preflight deadline expired: report every endpoint still opening as failed so the
+    /// session can commit. The worker keeps running and reports `Ok` if the open completes.
+    pub fn fail_unresponsive(&mut self) {
+        for (status, label) in [(&mut self.system, "System audio"), (&mut self.mic, "Microphone")] {
+            if matches!(status, Status::Starting) {
+                *status = Status::Failed {
+                    message: format!("{label} did not respond. Recording continues and adds it if the device opens."),
+                };
+            }
+        }
+    }
 }
 
 #[implement(IMMNotificationClient)]
@@ -306,6 +318,19 @@ mod tests {
         assert_eq!(json["system"]["state"], "ok");
         assert_eq!(json["mic"]["state"], "failed");
         assert_eq!(json["mic"]["message"], "permission denied");
+    }
+
+    #[test]
+    fn unresponsive_preflight_fails_only_endpoints_still_starting() {
+        let mut health = Health::new(true, true);
+        health.set(Source::System, Status::Ok);
+        health.fail_unresponsive();
+        assert!(matches!(health.system, Status::Ok));
+        assert!(matches!(&health.mic, Status::Failed { message } if message.starts_with("Microphone did not respond")));
+
+        let mut off = Health::new(false, true);
+        off.fail_unresponsive();
+        assert!(matches!(off.system, Status::Off));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
@@ -124,6 +124,11 @@ struct Pipe {
 /// Static screens produce zero WGC frames. Re-submit the last image at this floor so editors
 /// don't choke on multi-second frame gaps.
 const KEEPALIVE: i64 = 2_000_000; // 200ms → 5 fps floor
+
+/// WASAPI `Activate`/`Initialize` have no timeout. Until preflight ends there is no Handle,
+/// so Stop, quit and the disk-space ticker cannot reach the session. Commit after this long
+/// and report endpoints that are still opening as failed.
+const AUDIO_PREFLIGHT_DEADLINE: Duration = Duration::from_secs(10);
 
 pub fn start<F>(cfg: Config, on_end: F) -> Result<Handle>
 where
@@ -328,6 +333,7 @@ fn run(
     }
 
     // ---- writer loop
+    let preflight_started = Instant::now();
     let write = |m: Msg, writer: &mut MfWriter| -> Result<()> {
         match m {
             Msg::Video(s, pts) => {
@@ -344,7 +350,7 @@ fn run(
         // media while endpoints initialize: blocking on preflight here can fill the
         // writer queue even when the encoder/disk are healthy. Keep Starting visible
         // until every endpoint has reported its initial health (or exited).
-        if ready.is_some() && audio_preflight_complete(&mut audio_ready) {
+        if ready.is_some() && poll_audio_preflight(&mut audio_ready, preflight_started.elapsed(), &health) {
             if let Some(r) = ready.take() {
                 let _ = r.send(Ok(()));
             }
@@ -447,6 +453,25 @@ fn audio_preflight_complete(pending: &mut Vec<mpsc::Receiver<()>>) -> bool {
     pending.is_empty()
 }
 
+/// True once preflight has ended, either because every endpoint reported or because the
+/// deadline expired (stalled endpoints are then marked failed and stop gating startup).
+fn poll_audio_preflight(
+    pending: &mut Vec<mpsc::Receiver<()>>,
+    elapsed: Duration,
+    health: &Mutex<wasapi::Health>,
+) -> bool {
+    if audio_preflight_complete(pending) {
+        return true;
+    }
+    if elapsed < AUDIO_PREFLIGHT_DEADLINE {
+        return false;
+    }
+    tracing::warn!(pending = pending.len(), "Audio preflight deadline expired; starting without stalled endpoints");
+    pending.clear();
+    health.lock().unwrap().fail_unresponsive();
+    true
+}
+
 fn check_overflow(stats: &Stats) -> Result<()> {
     if stats.writer_queue.full.load(Ordering::Relaxed) != 0 {
         return Err(msg(
@@ -515,6 +540,29 @@ mod tests {
         system.send(()).unwrap();
         assert!(audio_preflight_complete(&mut pending));
         assert!(audio_preflight_complete(&mut pending));
+    }
+
+    #[test]
+    fn stalled_audio_preflight_ends_at_the_deadline_and_reports_the_endpoint() {
+        let health = Mutex::new(wasapi::Health::new(false, true));
+        let (_mic, mic_ready) = mpsc::sync_channel::<()>(1);
+        let mut pending = vec![mic_ready];
+        let just_before = AUDIO_PREFLIGHT_DEADLINE - Duration::from_millis(1);
+        assert!(!poll_audio_preflight(&mut pending, just_before, &health));
+        assert!(matches!(health.lock().unwrap().mic, wasapi::Status::Starting));
+        assert!(poll_audio_preflight(&mut pending, AUDIO_PREFLIGHT_DEADLINE, &health));
+        assert!(pending.is_empty());
+        assert!(matches!(health.lock().unwrap().mic, wasapi::Status::Failed { .. }));
+    }
+
+    #[test]
+    fn completed_audio_preflight_does_not_wait_for_the_deadline() {
+        let health = Mutex::new(wasapi::Health::new(true, false));
+        let (system, system_ready) = mpsc::sync_channel(1);
+        system.send(()).unwrap();
+        let mut pending = vec![system_ready];
+        assert!(poll_audio_preflight(&mut pending, Duration::ZERO, &health));
+        assert!(matches!(health.lock().unwrap().system, wasapi::Status::Starting));
     }
 
     #[test]

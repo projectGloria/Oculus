@@ -36,6 +36,296 @@ remain a separate roadmap; recording reliability and data safety still apply loc
 
 ---
 
+## Audit findings
+
+Static audit of the recording path at `b8e3452` (2026-11-12): `recorder.rs`, `session.rs`, `queue.rs`, `clock.rs`,
+`capture/`, `encode/mf_writer.rs`, `audio/`, `lifecycle.rs`. These findings come from reading the code only. None has
+been reproduced at runtime. Ordered by severity. Confidence describes how sure we are that the failure can happen,
+not how often it will.
+
+Checked and found sound: tracked-sample reuse (session pool, CFR repeat pool, keep-alive `CopyResource` ordering on the
+one protected immediate context), session-generation gating of `finished`/`tick`, Stop never waiting on the media
+or control queue, and mutex `unwrap()`s (no poisoning under `panic = "abort"`).
+
+### High
+
+- [x] **A stuck audio preflight cannot be cancelled and records without a disk-space guard** · High · P0 · M
+      *Fixed (2026-11-12, uncommitted):* preflight now has a 10 s deadline (`AUDIO_PREFLIGHT_DEADLINE`,
+      `poll_audio_preflight` in `session.rs`). When it expires, endpoints still `Starting` are reported `Failed`
+      (`Health::fail_unresponsive`) and the session commits, so Stop, quit, suspend and the disk-space ticker reach it
+      within 10 s and a cancel no longer discards an arbitrarily long recording. The worker keeps running and reports
+      `Ok` if its open completes later. Unit tests: `stalled_audio_preflight_ends_at_the_deadline_and_reports_the_endpoint`,
+      `completed_audio_preflight_does_not_wait_for_the_deadline`, `unresponsive_preflight_fails_only_endpoints_still_starting`.
+      *Not fixed here:* a WASAPI call that never returns still hangs teardown, which joins the worker (see the Medium
+      item below). Pre-commit Stop is bounded by the deadline rather than immediate.
+      *Evidence (2026-11-12, debug build, this machine):* `npm run verify` passed; its 5 s delayed-preflight clip
+      still waited for readiness (setup 5.30 s). An extra `--selftest … --secs 3 --sys --mic
+      --audio-preflight-delay-ms 15000` committed at 10.29 s instead of 15 s, exit 0, 0 rejected packets, and
+      `ffprobe` read h264 + aac streams of 13.03 s. The delay is synthetic; no real stalled device was tested.
+      [`session.rs:173`](src-tauri/src/session.rs#L173) blocks `Recorder::start` on `ready_rx.recv()` with no deadline.
+      Preflight completes only when every WASAPI worker has opened its endpoint
+      ([`session.rs:347`](src-tauri/src/session.rs#L347)). `GetDevice`/`Activate`/`Initialize`
+      ([`wasapi.rs:216-247`](src-tauri/src/audio/wasapi.rs#L216)) have no timeout. No `Handle` exists until commit.
+      As a result, Stop only sets `cancel_start` ([`recorder.rs:452-455`](src-tauri/src/recorder.rs#L452)), and the
+      ticker that enforces the 200 MB stop threshold is spawned only after commit
+      ([`recorder.rs:446`](src-tauri/src/recorder.rs#L446)).
+      *Scenario:* the mic is a Bluetooth headset that is still connecting, or a driver or `audiodg` stall blocks
+      `IAudioClient::Initialize` indefinitely. The writer is already capturing and writing video to the MP4. The UI
+      stays on "Starting" and Stop has no effect. Quit sets `quitting`, but `ExitRequested` keeps being prevented
+      ([`main.rs:202-205`](src-tauri/src/main.rs#L202)). `WM_QUERYENDSESSION` and suspend block in `stop_and_wait`
+      ([`recorder.rs:496-498`](src-tauri/src/recorder.rs#L496)). Meanwhile the file grows with no free-space check. If
+      the call eventually returns, the cancel deletes everything recorded so far
+      ([`recorder.rs:556-557`](src-tauri/src/recorder.rs#L556)).
+      *Confidence:* high that the code behaves this way. Medium that a WASAPI call blocks for long periods in the field.
+      The selftest `--audio-preflight-delay-ms` (capped at 60 s) can show the unbounded wait without real hardware.
+      *Direction:* route a pre-commit cancel to the writer's control channel. Give preflight a deadline after which
+      that source is marked `Failed` and startup continues. Run the disk check from the writer, or start the ticker
+      at setup.
+
+### Medium
+
+- [ ] **Finalization joins WASAPI workers that can be blocked inside a device reopen** · Medium · P1 · S
+      Teardown sets `stop` and then `join()`s every audio thread before it drains or finalizes
+      ([`session.rs:383-386`](src-tauri/src/session.rs#L383)). A worker checks `stop` only between WASAPI calls. After
+      any endpoint notification it reopens its device through the same untimed `Activate`/`Initialize` path
+      ([`wasapi.rs:174-194`](src-tauri/src/audio/wasapi.rs#L174), [`216-247`](src-tauri/src/audio/wasapi.rs#L216)).
+      *Scenario:* a Bluetooth headset drops mid-recording, the mic worker blocks in `Initialize` on the new default
+      device, and the user presses Stop. The recorder shows "Saving recording…" forever, and quit and shutdown wait
+      on it by design. An HEVC recording (regular MP4 sink) has no `moov` until `Finalize`, so killing the stuck
+      process loses the whole recording. *Confidence:* medium.
+      *Direction:* finalize video and the audio already mixed, then join workers with a bound. A stuck worker can be
+      abandoned, since it only owns its own COM objects.
+
+- [ ] **Overload budgets are well under a second and recording threads have no priority** · Medium · P1 · S
+      Any rejected packet ends the recording ([`session.rs:354`](src-tauri/src/session.rs#L354)). Video in the writer
+      queue is limited by the NV12 pool cap of 12 ([`convert.rs:193`](src-tauri/src/capture/convert.rs#L193)). The
+      mixer emits ~100 packets/s of 10 ms chunks ([`mixer.rs:21`](src-tauri/src/audio/mixer.rs#L21),
+      [`196-203`](src-tauri/src/audio/mixer.rs#L196)). The 128-slot writer queue
+      ([`session.rs:132`](src-tauri/src/session.rs#L132)) therefore tolerates only ~1.1 s of writer stall. The 64-slot
+      audio input queue ([`session.rs:133`](src-tauri/src/session.rs#L133)) takes ~10 ms packets per source, so with
+      system and mic both active it tolerates only ~320 ms of mixer starvation. In CFR mode the repeat pool waits
+      250 ms for a free surface and then fails the session
+      ([`mf_writer.rs:278-287`](src-tauri/src/encode/mf_writer.rs#L278)).
+      *Scenario:* a fullscreen game saturates the GPU and CPU, and a single slow fragment write or a 250 ms encoder
+      backlog ends the recording with an overload error. The partial file is kept, as designed. *Confidence:*
+      medium. The 2-second stall tests in §12 confirm that a stall ends the session, but the real-world stall
+      distribution has not been measured. *Direction:* emit larger mixer chunks (for example 50 ms) to raise the
+      writer budget without unbounded buffering. Measure before changing caps. Pairs with the MMCSS item in §11.2.
+
+### Low
+
+- [ ] **A recording with no frames leaves an empty MP4 labelled "partial output"** · Low · P2 · S
+      WGC delivers no frames for a minimized window, so the clock never latches
+      ([`clock.rs:27-37`](src-tauri/src/clock.rs#L27)), the mixer drops all audio, and keep-alive has no last frame
+      ([`session.rs:483`](src-tauri/src/session.rs#L483)). `run` returns "No frames were captured"
+      ([`session.rs:433-435`](src-tauri/src/session.rs#L433)) after commit, so the file is kept
+      ([`session.rs:164-167`](src-tauri/src/session.rs#L164)) and added to recent recordings as incomplete
+      ([`recorder.rs:575-583`](src-tauri/src/recorder.rs#L575)).
+      *Scenario:* pick a window, minimize it, press the Record hotkey, then Stop. The result is a sample-less MP4 in
+      the output folder, and history reports "Partial output retained at …". *Confidence:* high.
+      *Direction:* delete the file when `!had_video`, or refuse to start a window target that is `IsIconic`.
+
+- [ ] **Any audio device event restarts both capture streams** · Low · P2 · S
+      `OnDeviceStateChanged`, `OnDeviceAdded` and `OnDeviceRemoved` set `changed` for every endpoint of every flow,
+      even when a specific device was selected ([`wasapi.rs:72-83`](src-tauri/src/audio/wasapi.rs#L72)).
+      *Scenario:* an HDMI/DP monitor with an audio endpoint sleeps or wakes, or an unrelated USB audio device is
+      plugged in, during a recording. Both workers tear down and reopen their unchanged endpoints. Buffered packets
+      are discarded, and the gap is zero-filled: tens of ms, longer for Bluetooth. Every such event also exposes the
+      reopen hang above. *Confidence:* high. *Direction:* compare the notified device ID with the open endpoint, and
+      for "Default" restart only on `OnDefaultDeviceChanged` or on removal of the open device.
+
+- [ ] **Tray updates run synchronously under the recorder mutex on the main thread** · Low · P2 · S
+      `emit` calls `tray_status::update` while holding `inner` ([`recorder.rs:193-196`](src-tauri/src/recorder.rs#L193)).
+      `run_on_main_thread` executes inline when called from the main thread: `send_user_message` in
+      tauri-runtime-wry 2.12.3 checks `current_thread().id() == main_thread_id`. So `set_icon`/`set_tooltip` run with
+      the lock held for main-thread callers: tray Quit ([`main.rs:103`](src-tauri/src/main.rs#L103)), the pause/mute
+      hotkeys ([`main.rs:56`](src-tauri/src/main.rs#L56), [`69`](src-tauri/src/main.rs#L69)), and the sync commands
+      `stop_recording`, `toggle_pause`, `set_source`, `toggle_audio_mute`. This breaks the §6 invariant
+      ("dispatched … without waiting while holding the recorder lock").
+      *Scenario:* Explorer is hung or restarting when the user presses Stop. `Shell_NotifyIcon` blocks the main thread
+      while it holds the recorder mutex, so the writer's `finished` callback, the ticker and the lifecycle thread's
+      `stop_and_wait` also wait on Explorer. *Confidence:* medium. The inline dispatch is verified in the crate
+      source. `Shell_NotifyIcon` blocking on a hung Explorer has not been verified. *Direction:* collect the snapshot
+      under the lock and call `tray_status::update` after dropping it. The `seq` check already tolerates reordering.
+
+- [ ] **Cancelled-start cleanup deletes the file while holding the recorder mutex** · Low · P2 · S
+      [`recorder.rs:556-557`](src-tauri/src/recorder.rs#L556) calls `remove_file` inside `finished` with `inner`
+      locked. `tick` deliberately avoids this for disk queries ([`recorder.rs:607`](src-tauri/src/recorder.rs#L607)).
+      *Scenario:* the output folder is on an SMB share or a slow USB drive, and the user cancels during Starting. The
+      delete blocks for the redirector timeout, and every main-thread command (`get_recorder_state` from a reopened
+      panel, Stop, `set_source`) stalls with it. *Confidence:* high for the mechanism, low for the likelihood.
+      *Direction:* take the path out of `Inner`, then delete it after `drop(i)`.
+
+- [ ] **Thread-spawn `expect`s abort the process while a session is live** · Low · P2 · S
+      [`wasapi.rs:142`](src-tauri/src/audio/wasapi.rs#L142), [`mixer.rs:206`](src-tauri/src/audio/mixer.rs#L206)
+      and `thread::spawn` in [`recorder.rs:638`](src-tauri/src/recorder.rs#L638) panic if thread creation fails. The
+      writer thread uses `map_err` ([`session.rs:171`](src-tauri/src/session.rs#L171)).
+      *Scenario:* the system is at its commit limit when audio workers or the ticker start. The MP4 already exists and
+      WGC is running, so `panic = "abort"` kills the process and leaves the placeholder or partial file (unplayable
+      for HEVC). *Confidence:* high for the mechanism, low for the likelihood. *Direction:* use `Builder::spawn` with
+      errors propagated as setup failures, or mark the audio source `Failed`.
+
+- [ ] **The mixer trusts WASAPI timestamps unconditionally, and its zero-fill is unbounded** · Low · P2 · S
+      Only `AUDCLNT_BUFFERFLAGS_SILENT` is checked. `AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR` is ignored, and the reported
+      QPC is used as-is ([`wasapi.rs:263-271`](src-tauri/src/audio/wasapi.rs#L263)). `Track::push` zero-fills any
+      forward gap with no upper bound ([`mixer.rs:48-52`](src-tauri/src/audio/mixer.rs#L48)).
+      *Scenario:* a driver flags a packet with a bogus QPC seconds or hours ahead. That track jumps forward, and
+      correctly timed packets are then dropped as overlap until real time catches up, losing that span of audio. A
+      gap of hours would need GBs of zeros, and the allocation failure aborts mid-recording. *Confidence:* low; this
+      depends on driver behavior. *Direction:* drop or re-time `TIMESTAMP_ERROR` packets from the previous packet's
+      end, and clamp `gap` to the distance between the mixer's current position and `clock.now()`.
+
+### Non-recording code
+
+Static audit of the non-recording code at `b8e3452` (2026-11-12): `src/` (`api.js`, `settingsQueue.js`,
+`recorderSnapshot.js`, `hooks/`, the hotkey, settings and screenshot-feedback components), `commands.rs`,
+`hotkeys.rs`, `shell.rs`, `saved_output.rs`, `overlay/region.rs`, plus the parts of `settings.rs`, `recorder.rs`,
+`ui.rs` and `main.rs` they call. Same method and caveats as above: code reading only, nothing reproduced at
+runtime. Ordered by severity. No High findings.
+
+Checked and found sound: subscribe-then-hydrate in `useRecorder` (every snapshot, including the one `get_recorder_state`
+returns, takes its `seq` under the recorder lock, so a hydrate response is never older than an event already emitted,
+and the StrictMode double-mount unsubscribes a late `listen`); Rust-side listener cleanup for destroyed webviews
+(tauri 2.12.5 `on_window_close` and `on_webview_close` call `remove_webview_listeners`, so the recreated `main` and
+`screenshot-feedback` webviews do not inherit stale registrations, and every JS timer and listener in `hooks/` is
+cleared on unmount); held hotkeys do not auto-repeat (`global-hotkey` 0.8.0 registers with `MOD_NOREPEAT`); the
+register/unregister/persist rollback in `hotkeys::transition`; saved-file path validation (`output_file` canonicalizes
+both sides, so a junction or symlink inside the output folder that points outside it, `..` segments and sibling-prefix
+folders are rejected, and every command except `reveal` also requires the path to be a remembered output); `rename`
+never overwrites (`MoveFileExW` without `REPLACE_EXISTING`); `region::select` versus `Recorder::start` mutual
+exclusion; and the overlay's `STATE` `RefCell` is never borrowed across `ReleaseCapture`/`DestroyWindow`.
+
+### Medium
+
+- [ ] **One hotkey that failed to register at startup blocks every later hotkey edit** · Medium · P1 · S
+      [`Registry::initialize`](src-tauri/src/hotkeys.rs#L102) skips a conflicting key, so it is in the saved settings
+      but not in `registered`. [`Registry::save`](src-tauri/src/hotkeys.rs#L119) builds `desired` from the whole
+      saved set and tries to register everything missing, so it tries that key again and `transition` rolls the
+      entire change back ([`hotkeys.rs:150-164`](src-tauri/src/hotkeys.rs#L150)).
+      *Scenario:* OBS already owns `Ctrl+Shift+R` at launch, and the Settings row shows the warning. The user changes
+      the screenshot hotkey to `Ctrl+Alt+S` and gets "Shortcut Ctrl+Shift+R is unavailable…". Nothing can be saved
+      until the conflicting field is cleared or the other app is closed. "Retry saved hotkeys" fails the same way, and
+      rolls back the keys it registered. The unrelated edit is rejected with a message about a different shortcut.
+      *Confidence:* high. *Direction:* register the keys that changed, and report conflicts for the others as
+      per-key warnings instead of failing the whole transaction.
+
+- [ ] **Area selection fails on every monitor when any one monitor cannot be frozen** · Medium · P1 · S
+      Each monitor runs `select_monitor`, which calls `wgc::grab` ([`region.rs:181`](src-tauri/src/overlay/region.rs#L181)).
+      `grab` waits 1.5 s for a frame ([`wgc.rs:170-172`](src-tauri/src/capture/wgc.rs#L170)). Any worker error goes
+      to `Coordinator::finish` ([`region.rs:143`](src-tauri/src/overlay/region.rs#L143)), and the first result wins and
+      posts `CANCEL_SELECTION` to every overlay already open. `monitor_info` failing for a display that disappears
+      between enumeration and the worker ([`region.rs:178`](src-tauri/src/overlay/region.rs#L178), "No monitor under
+      cursor") ends it the same way.
+      *Scenario:* a display that is asleep, a DisplayLink or other virtual adapter that WGC does not deliver frames
+      for, or a monitor unplugged mid-selection. The overlays on the healthy monitors flash up and are torn down with
+      "Capture timed out (is the target minimized?)", so Area screenshot and Record area do not work at all
+      while that display is attached. *Confidence:* medium. The mechanism is certain; which displays miss the
+      1.5 s window is unmeasured. *Direction:* treat a failed monitor as skipped and fail only when no monitor
+      produced an overlay.
+
+- [ ] **Recent recordings from a previous output folder stay listed, but every action on them fails** · Medium · P2 · S
+      `saved_path` ([`commands.rs:191`](src-tauri/src/commands.rs#L191)) validates a remembered path against the
+      *current* output folder ([`shell.rs:12-22`](src-tauri/src/shell.rs#L12)). The remembered list is not cleared or
+      re-rooted when `outputDir` changes, and `set_settings` accepts any `outputDir`.
+      *Scenario:* record two clips, change the output folder in Settings, return to the panel. The Recent list
+      still shows both with Open, Show in folder, Copy, Rename and Delete. All fail with "Only files in the current
+      output folder can be shown", and the thumbnails fail to load. The same happens if the configured folder becomes
+      unavailable and `output_dir()` silently switches to the fallback (see the Low item on `output_dir()`).
+      *Confidence:* high. *Direction:* record the canonical folder each entry was saved into and validate against
+      that, or drop entries that no longer resolve under the current folder.
+
+### Low
+
+- [ ] **Invalid persisted hotkeys block every unrelated settings save, and the startup message is wrong** · Low · P2 · S
+      `read_settings`/`sanitized` never validate `hotkeys`, but [`SettingsStore::set`](src-tauri/src/settings.rs#L171)
+      calls `hotkeys.parsed()?` on every write, and the frontend always sends the full snapshot.
+      *Scenario:* a hand-edited `settings.json`, or a shortcut string a newer `global-hotkey` stops accepting after an
+      upgrade. At startup `initialize` registers nothing and reports it through `hotkey_failed`, which labels it
+      "unavailable (possibly in use by another app)" ([`recorder.rs:233-237`](src-tauri/src/recorder.rs#L233)). Then
+      toggling "Microphone" or moving a gain slider fails with "Invalid shortcut …" until the user finds the Hotkeys
+      section. *Confidence:* high. *Direction:* validate on load and fall back to defaults for the hotkeys with a notice,
+      and use a different message for parse errors.
+
+- [ ] **A rejected patch poisons later queued writes, and the hotkey draft keeps showing the rejected value** · Low · P2 · S
+      `update` merges each patch into `optimistic` and sends the whole snapshot
+      ([`settingsQueue.js:14-36`](src/settingsQueue.js#L14)). If request A is rejected by validation and request B
+      was queued while A was in flight, B carries A's rejected field and fails too. The revert to `confirmed` then
+      discards B's valid change. Only the latest request reports the error. `HotkeySettings` copies `value` into
+      `draft` once ([`HotkeySettings.jsx:9`](src/components/HotkeySettings.jsx#L9)), so after the revert the fields
+      still show the rejected shortcuts while the saved ones differ.
+      *Scenario:* save `Ctrl+Shift+Q` while another app owns it, and flip the System audio chip before the
+      `set_settings` round trip returns (it registers shortcuts, so it is not instant). The chip flip is reverted
+      along with the hotkey change. *Confidence:* high for the mechanism, low for the likelihood. *Direction:* send
+      patches (or rebase each request on `confirmed`), and reset `draft` when `value` changes.
+
+- [ ] **`SettingsStore::output_dir` creates the folder and writes a probe file on every call, including validation** · Low · P2 · S
+      [`settings.rs:198-213`](src-tauri/src/settings.rs#L198) runs `create_dir_all` plus a create/delete probe each
+      time. `saved_path`, `reveal` and `open_output_dir` call it, so each thumbnail fetch, Open and Rename does.
+      *Scenario:* the user deletes the output folder while Oculus runs, then clicks Open on a recent entry. The
+      folder is recreated empty. On a slow or offline share each click pays the redirector timeout, and a failure
+      swaps in the fallback folder and sets a warning from inside a read-only action.
+      *Confidence:* high. *Direction:* probe only when starting a save, and have validation only canonicalize.
+
+- [ ] **Window snapping uses `GetWindowRect`, which includes the invisible resize border** · Low · P2 · S
+      [`snap_rects`](src-tauri/src/overlay/region.rs#L405) (and [`sources.rs:147`](src-tauri/src/sources.rs#L147))
+      take `GetWindowRect`. On Windows 10 and 11 that rect extends about 7 px past the visible frame on the left,
+      right and bottom for most top-level windows.
+      *Scenario:* click a window in the area picker. The selection, and the screenshot or recording, includes a strip
+      of whatever is behind the window on three sides. *Confidence:* high for the platform behavior, not yet
+      confirmed in this app. *Direction:* use `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`.
+
+- [ ] **Alt+Enter may trigger DXGI's fullscreen toggle on the overlay** · Low · P3 · S
+      The overlay swap chain is created with `CreateSwapChainForHwnd` and no `MakeWindowAssociation`
+      ([`region.rs:268`](src-tauri/src/overlay/region.rs#L268)). DXGI's default is to watch the window's messages for
+      Alt+Enter. The `WM_SYSKEYDOWN` arm also treats Enter as confirm ([`region.rs:618-638`](src-tauri/src/overlay/region.rs#L618)),
+      and Alt+arrows resize, so the user may well still be holding Alt when pressing Enter.
+      *Scenario:* resize with Alt+arrows, then press Enter without releasing Alt. The overlay may flicker through a
+      mode switch before it confirms. *Confidence:* low. Not tested here. *Direction:*
+      `MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER)`.
+
+- [ ] **A panic in an overlay worker aborts the process, including a live recording** · Low · P3 · S
+      [`region.rs:113-116`](src-tauri/src/overlay/region.rs#L113) wraps each worker in `catch_unwind`, but release
+      builds are `panic = "abort"`, so that fallback never runs. Area screenshot is allowed while recording, and
+      `render` holds `STATE.borrow()` across D2D/DXGI calls ([`region.rs:456-518`](src-tauri/src/overlay/region.rs#L456)).
+      *Scenario:* any panic in the picker (a `RefCell` double borrow if a call under that borrow ever pumps a
+      message, an unwrap in a later change) kills the recorder with it, and an HEVC file has no `moov`. No concrete
+      trigger found. *Confidence:* low. *Direction:* keep the picker free of panicking paths, and drop the
+      misleading `catch_unwind`.
+
+- [ ] **`open` runs `ShellExecuteW` on a thread that exits immediately** · Low · P3 · S
+      [`saved_output.rs:40-52`](src-tauri/src/saved_output.rs#L40) spawns a thread, enters an STA, calls
+      `ShellExecuteW` and tears the apartment down on return. The documentation recommends keeping the thread alive,
+      or `SEE_MASK_NOASYNC` with `ShellExecuteEx`, for handlers that start asynchronously (DDE).
+      `details` and `open` also use `std::thread::spawn`, which aborts on thread-creation failure.
+      *Scenario:* a default app that is launched through a DDE verb occasionally never opens, and returns no error.
+      *Confidence:* low. Handlers differ and none was tested. *Direction:* use `ShellExecuteExW` with
+      `SEE_MASK_NOASYNC`, and `Builder::spawn`.
+
+- [ ] **`reveal` is the only saved-file command that skips the remembered-output check** · Low · P3 · S
+      [`commands.rs:169-177`](src-tauri/src/commands.rs#L169) goes straight to `shell::output_file`, while the other
+      six go through `saved_path`. The path check still holds, so this only lets the webview reveal any regular file
+      under the output folder, not outside it. It is still inconsistent with the §6 statement that the webview can
+      only act on remembered outputs. *Confidence:* high. *Direction:* route it through `saved_path`.
+
+- [ ] **A failed hydrate or `listen` leaves the recorder UI on an idle default with no retry** · Low · P3 · S
+      On a rejection, `useRecorder` keeps `INITIAL` (`seq: 0`, idle) and shows an error
+      ([`useRecorder.js:44-46`](src/hooks/useRecorder.js#L44)). A later event heals it, and while recording the
+      ticker emits once a second. If `listen` rejects, or the session is paused or finalizing when
+      `get_recorder_state` fails, the panel shows Record while a recording is running. `useSettings` likewise leaves
+      `settings` null on a failed load ([`useSettings.js:15`](src/hooks/useSettings.js#L15)), so the chips and the
+      Settings drawer never appear. *Confidence:* high for the mechanism, low for the likelihood. *Direction:* retry
+      with backoff and keep the error visible until it succeeds.
+
+- [ ] **An empty screenshot-feedback window stays up after the screenshot is deleted** · Low · P3 · S
+      `ScreenshotFeedback` renders `null` when `lastScreenshot` is empty
+      ([`ScreenshotFeedback.jsx:7-11`](src/components/ScreenshotFeedback.jsx#L7)), but the always-on-top 340×210
+      window is only destroyed by the five-second timer ([`ui.rs:78-88`](src-tauri/src/ui.rs#L78)).
+      *Scenario:* take a screenshot and delete it from the main panel card within five seconds. A blank dark
+      rectangle remains in the corner until the timer fires. *Confidence:* medium. *Direction:* call
+      `dismiss_screenshot_feedback` from `update_saved_output` when the removed path is the preview's.
+
+---
+
 ## 1. P0 — Data safety & correctness bugs
 
 ### 1.1 Crash mid-recording = unplayable file · P0 · M
