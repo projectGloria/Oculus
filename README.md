@@ -230,6 +230,21 @@ npm test
 npm run verify
 ```
 
+### How to Release
+
+1. Update the version across `package.json`, `Cargo.toml`, `tauri.conf.json`, and lockfiles, then commit the change:
+   ```powershell
+   npm run set:version -- 1.0.0
+   git commit -am "Release v1.0.0"
+   ```
+2. Create and push a version tag to trigger the **Build installers** workflow:
+   ```powershell
+   git tag v1.0.0 && git push --tags
+   ```
+3. Download the built Windows installer (`oculus-<version>-windows-x64.exe`) from:
+   - **GitHub Releases** (created automatically for every `v*` tag), or
+   - **Actions → Build installers → `installers` artifact** (available on both tag builds and manual `workflow_dispatch` runs).
+
 ---
 
 ## 🛡️ Recording Safety
