@@ -1,0 +1,10 @@
+id = "Oculus"
+name = "Oculus"
+version = "0.1.0"
+main_exe = "oculus.exe"
+icon = "src-tauri/icons/icon.ico"
+accent = "#a855f7"
+description = "Direct3D 11 screen recorder & capture studio"
+needs_webview2 = true
+data_folders = ["%APPDATA%\\dev.gloria.oculus", "%LOCALAPPDATA%\\dev.gloria.oculus", "%LOCALAPPDATA%\\Oculus"]
+legacy_names = ["Oculus"]

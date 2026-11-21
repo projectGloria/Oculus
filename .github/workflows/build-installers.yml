@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-installers-${{ github.ref }}
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-windows:
-    name: Build Windows installer (x64)
+    name: Build and pack Windows setup (x64)
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -51,55 +51,39 @@ jobs:
       - name: Verify package version consistency
         run: npm run check:version
 
-      - name: Build Tauri NSIS installer
-        run: npm run tauri build -- --ci
+      - name: Build release exe
+        run: npm run tauri build -- --ci --no-bundle
 
-      - name: Determine release version
-        id: version
+      - name: Stage runtime files
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $ver = $env:GITHUB_REF_NAME -replace '^v', ''
-          } else {
-            $ver = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          }
-          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          New-Item -ItemType Directory -Force -Path app-dist | Out-Null
+          Copy-Item src-tauri/target/release/oculus.exe app-dist/oculus.exe
+          Get-ChildItem app-dist
 
-      - name: Collect installers
+      - name: Download WebView2 bootstrapper
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path installers | Out-Null
-          $installers = @(Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*-setup.exe")
-          if ($installers.Count -ne 1) {
-            throw "Expected 1 NSIS installer, found $($installers.Count)."
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile MicrosoftEdgeWebview2Setup.exe
+          if ((Get-Item MicrosoftEdgeWebview2Setup.exe).Length -lt 1MB) { throw "WebView2 bootstrapper download looks wrong" }
+
+      - name: Make sure the release exists
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --generate-notes --verify-tag
+            if ($LASTEXITCODE -ne 0) { throw "could not create release $env:GITHUB_REF_NAME" }
           }
-          $dest = "installers/oculus-${{ steps.version.outputs.version }}-windows-x64.exe"
-          Copy-Item -Path $installers[0].FullName -Destination $dest
-          Get-ChildItem -Path installers
 
-      - name: Upload installers artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Pack with GloriaSetup
+        uses: projectGloria/GloriaSetup@v0.1.0
         with:
-          name: installers
-          path: installers/
-          if-no-files-found: error
-
-  release:
-    name: Create GitHub Release
-    needs: build-windows
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download installers artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: installers
-          path: installers
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: installers/*
-          generate_release_notes: true
+          app-dir: app-dist
+          manifest: gloria.toml
+          webview2-bootstrapper: MicrosoftEdgeWebview2Setup.exe
+          certificate: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          certificate-password: ${{ secrets.WINDOWS_PFX_PASSWORD }}
