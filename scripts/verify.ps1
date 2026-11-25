@@ -96,6 +96,16 @@ try {
     if ($cancelOutput -notcontains "startup cancellation completed") { throw "Startup-cancellation driver did not run" }
     if (@(Get-ChildItem -LiteralPath $cancelDir -Filter *.mp4).Count -ne 0) { throw "Cancelled startup retained a recording" }
 
+    $replayDir = Join-Path $outputDir "replay"
+    Invoke-Checked $exePath @("--selftest-app", $replayDir, "--replay", "--tray")
+    $replays = @(Get-ChildItem -LiteralPath $replayDir -Filter *.mp4 | Sort-Object CreationTime)
+    if ($replays.Count -ne 2) { throw "Expected two replay clips" }
+    Assert-Media $replays[0].FullName "h264" 1.5
+    Assert-Media $replays[1].FullName "h264" 4.9
+    $duration = & ffprobe -v error -show_entries format=duration -of csv=p=0 $replays[1].FullName
+    if ([double]$duration -gt 5.15) { throw "Replay exceeded the configured five-second history" }
+    if (@(Get-ChildItem -LiteralPath $replayDir -Directory -Force).Count) { throw "Replay segments survived shutdown" }
+
     $quitDir = Join-Path $outputDir "slow-quit"
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-Checked $exePath @("--selftest-app", $quitDir, "--finalize-delay-ms", "7000")

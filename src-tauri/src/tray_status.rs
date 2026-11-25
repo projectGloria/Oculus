@@ -35,6 +35,7 @@ fn tooltip(state: &str, elapsed_ms: u64) -> String {
     let label = match state {
         "starting" => "Starting recording…",
         "recording" => "Recording",
+        "replay" => "Pre-recording",
         "paused" => "Paused",
         "finalizing" => "Saving recording…",
         _ => return "Oculus".into(),
@@ -52,6 +53,7 @@ fn tooltip(state: &str, elapsed_ms: u64) -> String {
 // as well as amber, so recording and paused remain distinguishable without color.
 fn status_icon(state: &str) -> Image<'static> {
     let color = match state {
+        "replay" => [74, 173, 142, 255],
         "recording" => [239, 68, 68, 255],
         "paused" => [245, 179, 66, 255],
         _ => [138, 143, 156, 255],

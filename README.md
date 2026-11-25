@@ -44,6 +44,12 @@
 
 ---
 
+## Pre-record
+
+Choose a source and audio inputs, then click **Pre-record**. Press **Ctrl+Shift+B** to save the preceding two minutes to your recordings folder. An early press saves the time captured so far. You can hide the bar in the tray and keep saving clips. Stop discards the remaining buffer.
+
+Change the duration under **Settings → Pre-record duration** and the shortcut under **Settings → Hotkeys → Save replay**.
+
 ## 👁️ About Oculus
 
 **Oculus** is a lightweight, local-first Windows application engineered for creators, developers, and power users who need instant screen recording and pixel-perfect screenshots without the overhead of massive multi-hundred-megabyte runtimes.

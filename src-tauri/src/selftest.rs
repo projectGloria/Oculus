@@ -71,12 +71,48 @@ pub fn install_app_driver(app: &tauri::AppHandle) {
         app.exit(2);
         return;
     };
-    app.state::<crate::settings::SettingsStore>().configure_selftest(PathBuf::from(output));
+    let replay_seconds = args
+        .iter()
+        .position(|arg| arg == "--replay-seconds")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(5)
+        .clamp(5, 600);
+    app.state::<crate::settings::SettingsStore>().configure_selftest(PathBuf::from(output), replay_seconds);
     let cancel = args.iter().any(|a| a == "--cancel-start");
     let app = app.clone();
     std::thread::spawn(move || {
         let recorder = app.state::<Recorder>();
-        if cancel {
+        if args.iter().any(|a| a == "--replay") {
+            let result = (|| -> crate::error::Result<()> {
+                recorder.start_mode(&app, true)?;
+                std::thread::sleep(Duration::from_secs(2));
+                // Exercise the same dispatch path as a global shortcut while the panel is closed.
+                let key = app.state::<crate::settings::SettingsStore>().get().hotkeys.save_replay.parse().unwrap();
+                crate::on_hotkey(&app, &key);
+                let deadline = Instant::now() + Duration::from_secs(60);
+                loop {
+                    let snapshot = recorder.get();
+                    if !snapshot.recent_recordings.is_empty() {
+                        break;
+                    }
+                    if let Some(error) = snapshot.error {
+                        return Err(crate::error::msg(error));
+                    }
+                    if Instant::now() > deadline {
+                        return Err(crate::error::msg("Timed out waiting for the replay shortcut"));
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                std::thread::sleep(Duration::from_secs(u64::from(replay_seconds) + 2));
+                recorder.save_replay(&app)
+            })();
+            if let Err(error) = result {
+                eprintln!("Replay verification failed: {error}");
+                recorder.request_exit_code(&app, 1);
+                return;
+            }
+        } else if cancel {
             let a = app.clone();
             let starter = std::thread::spawn(move || a.state::<Recorder>().start(&a));
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -214,6 +250,7 @@ pub fn run(args: &[String]) -> i32 {
         (v[0], v[1])
     });
     let cfg = Config {
+        replay: None,
         target,
         crop,
         fps: flag("--fps").and_then(|s| s.parse().ok()).unwrap_or(60),

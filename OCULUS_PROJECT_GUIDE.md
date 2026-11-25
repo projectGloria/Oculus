@@ -12,6 +12,12 @@ Project documentation is maintained in three files: [README.md](README.md) for t
 
 The core recorder is implemented and has passed substantial local testing. The full backlog is unfinished. Some entries describe missing features; others describe code that exists but still needs hardware or interaction testing. Public-distribution work is deferred because you intend to use the application yourself. **You do not need a code-signing certificate for that use.**
 
+## Pre-record
+
+Pre-record is an opt-in capture mode that shares the recorder’s source, audio, encoder and lifecycle handling. The writer keeps a time-bounded set of temporary MP4 segments in the output directory. Saving pins the segments that intersect the requested interval. Windows MediaComposition trims them to the keypress timeline and exports a recording while capture continues. Normal shutdown removes the working directory. An abrupt process kill can leave a directory named `.oculus-replay-*` beside the saved recordings.
+
+On 22 November 2026, the Windows recording verifier passed with HEVC included. A separate tray-mode replay run exported an early clip and then a full two-minute MP4 from the same session. The full clip decoded successfully, with 120.011 seconds of H.264 video and 120.000 seconds of AAC audio. Shutdown removed the temporary segments.
+
 ## Contents
 
 1. [Current status and what is left](#1-current-status-and-what-is-left)
@@ -97,7 +103,7 @@ The application combines a small React interface with a Rust backend that uses n
 | Local files, clipboard, tray, and shortcuts | Mandatory accounts, cloud storage, or telemetry |
 | Native Windows processing | Bundling FFmpeg or using Electron |
 
-Webcam overlays, trimming, replay buffers, annotations, and optional sharing appear in the later-feature backlog. Their presence there does not mean they are already available or necessary before personal use.
+Webcam overlays, trimming, annotations, and optional sharing appear in the later-feature backlog. Their presence there does not mean they are already available or necessary before personal use.
 
 ### 2.2 Requirements
 
@@ -711,7 +717,7 @@ PNG already uses fast compression and adaptive filtering. A repeatable 4K speed/
 | Saving | Naming templates, auto-open folder or auto-copy options |
 | Timing | Maximum duration, automatic/scheduled stop |
 | File history/editing | Recent recordings, discard with an undo design, trimming, size-targeted GIF/MP4 export |
-| Capture convenience | Replay buffer and optional pause markers in the result |
+| Capture convenience | Optional pause markers in the result |
 | Tray behavior | First-close explanation and actual launch-at-login lifecycle checks |
 | Presentation | Icon/tray crispness at multiple scales/themes, Win10 font metrics, full contrast/text-scaling checks |
 | Appearance | Decide dark-only versus light theme; optional transitions/Mica/acrylic subject to resource measurements |
@@ -748,7 +754,7 @@ The existing JavaScript tests exercise ordering helpers and other logic; they do
 
 ### 11.8 Larger optional features and non-goals
 
-Later ideas include webcam bubbles, composed scenes, live pen/highlighter/spotlight tools, auto-zoom, blur/redaction regions, replay, trimming, and opt-in upload/share integrations. Each needs its own scope and tests. Uploading would change the current local-only behavior and privacy documentation and must remain an explicit future choice.
+Later ideas include webcam bubbles, composed scenes, live pen/highlighter/spotlight tools, auto-zoom, blur/redaction regions, trimming, and opt-in upload/share integrations. Each needs its own scope and tests. Uploading would change the current local-only behavior and privacy documentation and must remain an explicit future choice.
 
 Linux/macOS, streaming, a full editor, mandatory accounts/cloud, and telemetry remain outside the current product scope. They should not be treated as unfinished requirements for your personal Windows recorder.
 

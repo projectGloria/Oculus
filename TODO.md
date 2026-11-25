@@ -825,7 +825,8 @@ Successful target closure is now a neutral notice, separate from errors.
 - [x] **"Record area" one-shot**: select region → recording starts (today: select, then press Record). P1 · S
 - [ ] **Discard recording** button/hotkey (stop and delete, with undo toast). P2 · S
 - [ ] **Max duration / auto-stop timer** and **scheduled stop**. P3 · S
-- [ ] **Replay buffer** ("save last 30 s"), à la ShadowPlay: ring of encoded GOPs in memory. P3 · L
+- [x] **Replay buffer** with configurable duration, a global save shortcut and bounded temporary MP4 segments.
+- [ ] Evaluate an in-memory encoded GOP buffer to reduce disk writes during pre-recording. P3 · L
 - [ ] **Trim after recording** (lossless keyframe trim via MF remux; precise trim needs re-encode of the edges). P2 · L
 - [ ] **Export GIF / short MP4 for chat** (size-targeted). P3 · M
 - [ ] **File naming template** (`{date} {time} {source}`), with the window title in the filename for window recordings. P2 · S
@@ -1062,4 +1063,4 @@ Successful target closure is now a neutral notice, separate from errors.
    installer, LICENSE, CI, code signing.
 3. **Parity (≈2 weeks):** encoder rate control/GOP, fps options + CFR mode, device pickers + meters + separate tracks,
    multi-monitor region overlay with snapping/handles, region frame during recording, window icons, monitor names.
-4. **Differentiators:** per-app audio, cursor effects, trim, replay buffer, annotation.
+4. **Differentiators:** per-app audio, cursor effects, trim, in-memory replay buffering, annotation.

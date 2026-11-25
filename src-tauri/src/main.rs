@@ -15,6 +15,7 @@ mod overlay;
 mod platform;
 mod queue;
 mod recorder;
+mod replay;
 mod saved_output;
 mod screenshot;
 #[cfg(debug_assertions)]
@@ -50,6 +51,12 @@ fn perform_action(app: &AppHandle, action: hotkeys::Action) {
             if let Err(e) = app.state::<Recorder>().toggle(&app) {
                 tracing::error!(error = %e, "Recording hotkey failed");
                 app.state::<Recorder>().action_failed(&app, format!("Could not start recording: {e}"));
+            }
+        });
+    } else if action == hotkeys::Action::SaveReplay {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = commands::save_replay(app.clone()).await {
+                app.state::<Recorder>().action_failed(&app, e.to_string());
             }
         });
     } else if action == hotkeys::Action::Pause {
@@ -168,6 +175,8 @@ fn main() {
             commands::get_recorder_state,
             commands::set_source,
             commands::start_recording,
+            commands::start_replay,
+            commands::save_replay,
             commands::stop_recording,
             commands::toggle_pause,
             commands::select_region,

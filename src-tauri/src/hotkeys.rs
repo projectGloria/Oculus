@@ -15,6 +15,7 @@ pub enum Action {
     Area,
     RecordArea,
     RecordWindow,
+    SaveReplay,
     MuteMic,
 }
 
@@ -23,6 +24,7 @@ pub enum Action {
 pub struct Hotkeys {
     pub enabled: bool,
     pub record: String,
+    pub save_replay: String,
     pub pause: String,
     pub screenshot: String,
     pub area: String,
@@ -36,6 +38,7 @@ impl Default for Hotkeys {
         Self {
             enabled: true,
             record: "Ctrl+Shift+R".into(),
+            save_replay: "Ctrl+Shift+B".into(),
             pause: "Ctrl+Shift+P".into(),
             screenshot: "Ctrl+Shift+S".into(),
             area: "Ctrl+Shift+A".into(),
@@ -54,6 +57,7 @@ impl Hotkeys {
         let mut parsed = Vec::new();
         for (action, value) in [
             (Action::Record, &self.record),
+            (Action::SaveReplay, &self.save_replay),
             (Action::Pause, &self.pause),
             (Action::Screenshot, &self.screenshot),
             (Action::Area, &self.area),
@@ -201,7 +205,7 @@ mod tests {
         settings.pause = "a".into();
         assert!(settings.parsed().is_err());
         settings.pause.clear();
-        assert_eq!(settings.parsed().unwrap().len(), 3);
+        assert_eq!(settings.parsed().unwrap().len(), 4);
         settings.enabled = false;
         assert!(settings.parsed().unwrap().is_empty());
     }

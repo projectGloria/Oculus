@@ -157,6 +157,7 @@ kbd { font: 11px/1 inherit; padding: 2px 5px; border-radius: 4px; background: va
 .bar-actions { display: flex; gap: 2px; }
 .audio-indicator { display: inline-flex; align-items: center; gap: 2px; padding: 0 3px; color: var(--muted); }
 .audio-indicator.warn, .icon-btn.warn { color: var(--amber); }
+.icon-btn.replay-save { width: auto; padding-inline: 5px; }
 .icon-btn.stop { color: var(--accent); }
 .icon-btn.stop:hover { background: var(--accent); color: #fff; }
 @keyframes pulse { 50% { opacity: 0.35; } }

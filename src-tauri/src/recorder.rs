@@ -48,6 +48,9 @@ impl Source {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub replay: bool,
+    pub replay_seconds: u32,
+    pub saving_replay: bool,
     pub seq: u64,
     /// idle | starting | recording | paused | finalizing
     pub state: &'static str,
@@ -72,6 +75,9 @@ pub struct Snapshot {
 
 #[derive(Default)]
 struct Inner {
+    replay: bool,
+    replay_seconds: u32,
+    pending_replays: u32,
     session: Option<session::Handle>,
     starting: bool,
     cancel_start: bool,
@@ -159,6 +165,9 @@ impl Recorder {
             None => ("idle", None, 0),
         };
         Snapshot {
+            replay: i.replay,
+            replay_seconds: i.replay_seconds,
+            saving_replay: i.pending_replays > 0,
             seq: self.seq.fetch_add(1, Ordering::Relaxed) + 1,
             state,
             elapsed_ms: elapsed.map_or(0, |e| (e / 10_000).max(0) as u64),
@@ -192,7 +201,8 @@ impl Recorder {
     /// Snapshot + emit under the same lock, so `seq` order == emission order.
     fn emit(&self, app: &AppHandle, i: &Inner) {
         let snapshot = self.snapshot(i);
-        crate::tray_status::update(app, snapshot.seq, snapshot.state, snapshot.elapsed_ms);
+        let tray_state = if snapshot.replay && snapshot.state == "recording" { "replay" } else { snapshot.state };
+        crate::tray_status::update(app, snapshot.seq, tray_state, snapshot.elapsed_ms);
         let _ = app.emit("recorder://state", snapshot);
     }
 
@@ -295,7 +305,38 @@ impl Recorder {
         self.emit(app, &i);
     }
 
+    pub fn save_replay(&self, app: &AppHandle) -> Result<()> {
+        let mut i = self.inner.lock().unwrap();
+        if i.pending_replays >= 4 {
+            return Err(msg("Four replays are already waiting to be saved"));
+        }
+        let h = i.session.as_ref().filter(|_| !i.finalizing).ok_or_else(|| msg("Start pre-recording first"))?;
+        let buffer = h.replay.clone().ok_or_else(|| msg("Start pre-recording first"))?;
+        let end = h.clock.now().filter(|t| *t > 0).ok_or_else(|| msg("Waiting for the first frame"))?;
+        i.pending_replays += 1;
+        self.emit(app, &i);
+        drop(i);
+        let result = buffer.save(end);
+        let mut i = self.inner.lock().unwrap();
+        i.pending_replays -= 1;
+        match &result {
+            Ok(saved) => {
+                i.remember_recording(saved.clone());
+                i.error = None;
+                i.notice = Some("Replay saved".into());
+            }
+            Err(error) => i.error = Some(error.to_string()),
+        }
+        self.emit(app, &i);
+        self.finished_signal.notify_all();
+        result.map(|_| ())
+    }
+
     pub fn start(&self, app: &AppHandle) -> Result<()> {
+        self.start_mode(app, false)
+    }
+
+    pub fn start_mode(&self, app: &AppHandle, replay: bool) -> Result<()> {
         if crate::overlay::region::is_selecting() {
             return Err(msg("Confirm or cancel area selection before recording."));
         }
@@ -309,6 +350,8 @@ impl Recorder {
         if i.starting || i.session.is_some() {
             return Err(msg("Already recording"));
         }
+        i.replay = replay;
+        i.replay_seconds = app.state::<SettingsStore>().get().replay_seconds;
         i.starting = true;
         i.cancel_start = false;
         i.generation += 1;
@@ -359,7 +402,12 @@ impl Recorder {
             if free < DISK_WARN_BYTES {
                 output_notice = Some("Low disk space: less than 2 GB free in the recording folder.".into());
             }
-            let (path, reservation) = reserve_output(&dir, &format!("Oculus {}", local_stamp()), "mp4")?;
+            let buffer = replay.then(|| crate::replay::Buffer::new(&dir, s.replay_seconds)).transpose()?;
+            let (path, reservation) = if let Some(buffer) = &buffer {
+                reserve_output(buffer.directory(), "first", "mp4")?
+            } else {
+                reserve_output(&dir, &format!("Oculus {}", local_stamp()), "mp4")?
+            };
             // MF opens the reserved placeholder by URL. Other saves must leave it in place.
             drop(reservation);
             let output_path = path.clone();
@@ -380,6 +428,7 @@ impl Recorder {
                 mic_device: s.mic_device.clone(),
                 gains: Gains { system: s.system_gain, mic: s.mic_gain },
                 path,
+                replay: buffer,
             };
             let a = app.clone();
             let handle = session::start(cfg, move |o| {
@@ -398,6 +447,7 @@ impl Recorder {
         let (handle, source, identity) = match result {
             Ok(value) => value,
             Err(e) => {
+                i.replay = false;
                 i.cancel_start = false;
                 i.finalizing = false;
                 i.error = Some(e.to_string());
@@ -519,6 +569,9 @@ impl Recorder {
 
     pub fn toggle_pause(&self, app: &AppHandle) {
         let i = self.inner.lock().unwrap();
+        if i.replay {
+            return;
+        }
         if let (Some(h), false) = (&i.session, i.finalizing) {
             if h.clock.paused() {
                 h.clock.resume()
@@ -551,9 +604,18 @@ impl Recorder {
             return;
         }
         i.last_encoder = o.encoder_name.clone();
+        i.finalizing = true;
+        while i.pending_replays > 0 {
+            i = self.finished_signal.wait(i).unwrap();
+        }
         i.session = None;
         i.finalizing = false;
-        if i.cancelled_start {
+        if i.replay {
+            i.error = o.result.err().map(|e| e.to_string());
+            i.notice = Some("Pre-recording stopped".into());
+            i.cancelled_start = false;
+            i.replay = false;
+        } else if i.cancelled_start {
             let _ = std::fs::remove_file(&o.path);
             i.cancelled_start = false;
             i.error = None;

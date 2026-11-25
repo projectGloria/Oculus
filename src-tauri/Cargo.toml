@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
+tempfile = "3"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,6 +31,10 @@ features = [
   "Wdk_System_SystemServices",
   "Foundation",
   "Foundation_Metadata",
+  "Media_Editing",
+  "Media_MediaProperties",
+  "Media_Transcoding",
+  "Storage_Streams",
   "Graphics",
   "Graphics_Capture",
   "Graphics_DirectX",

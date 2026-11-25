@@ -114,6 +114,15 @@ export function SettingsDrawer({ settings, update, hotkeyErrors = [] }) {
     <section className="drawer">
       <ErrorBanner error={error} />
       <h2 className="settings-heading">Recording</h2>
+      <label className="row device-row">
+        <span>Pre-record duration</span>
+        <select value={settings.replaySeconds} onChange={(e) => update({ replaySeconds: +e.target.value })}>
+          {[...new Set([15, 30, 60, 120, 300, 600, settings.replaySeconds])].sort((a, b) => a - b).map((s) =>
+            <option key={s} value={s}>{s % 60 ? `${s} seconds` : `${s / 60} min`}</option>)}
+        </select>
+      </label>
+      <p className="hint">Start Pre-record from the main panel, then {settings.hotkeys?.enabled && settings.hotkeys.saveReplay
+        ? `press ${settings.hotkeys.saveReplay}` : "click Save on the recording bar"} to keep the latest clip.</p>
       <Toggle label="Launch at login, minimized to tray" checked={settings.launchAtLogin} onChange={(launchAtLogin) => update({ launchAtLogin })} />
       <div className="row">
         <span>Save to</span>

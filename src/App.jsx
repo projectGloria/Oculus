@@ -69,6 +69,7 @@ function Panel({ rec }) {
           <button className="record" onClick={start} title={`Record${shortcutHint(rec.hotkeys, "record")}`}>
             <span className="record-dot" /> Record
           </button>
+          <button className="btn" onClick={() => { setActionError(null); api.startReplay().catch((e) => setActionError(String(e))); }} title="Start buffering the selected source">Pre-record</button>
           <button className="btn square" onClick={() => { setActionError(null); api.screenshot().catch((e) => setActionError(`Could not take screenshot: ${e}`)); }} title={`Screenshot${shortcutHint(rec.hotkeys, "screenshot")}`} aria-label="Screenshot">
             <Camera width={18} height={18} />
           </button>

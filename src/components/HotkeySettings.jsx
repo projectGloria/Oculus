@@ -2,8 +2,8 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { ErrorBanner } from "./ErrorBanner.jsx";
 
-const DEFAULTS = { enabled: true, record: "Ctrl+Shift+R", pause: "Ctrl+Shift+P", screenshot: "Ctrl+Shift+S", area: "Ctrl+Shift+A", recordArea: "", recordWindow: "", muteMic: "" };
-const FIELDS = [["record", "Start / stop"], ["pause", "Pause / resume"], ["screenshot", "Screenshot"], ["area", "Area screenshot"], ["recordArea", "Record an area"], ["recordWindow", "Record window under cursor"], ["muteMic", "Mute / unmute microphone"]];
+const DEFAULTS = { enabled: true, saveReplay: "Ctrl+Shift+B", record: "Ctrl+Shift+R", pause: "Ctrl+Shift+P", screenshot: "Ctrl+Shift+S", area: "Ctrl+Shift+A", recordArea: "", recordWindow: "", muteMic: "" };
+const FIELDS = [["record", "Start / stop"], ["saveReplay", "Save replay"], ["pause", "Pause / resume"], ["screenshot", "Screenshot"], ["area", "Area screenshot"], ["recordArea", "Record an area"], ["recordWindow", "Record window under cursor"], ["muteMic", "Mute / unmute microphone"]];
 
 export function HotkeySettings({ value, update, errors }) {
   const [draft, setDraft] = useState(value ?? DEFAULTS);

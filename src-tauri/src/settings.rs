@@ -38,6 +38,7 @@ pub struct Settings {
     pub version: u32,
     pub launch_at_login: bool,
     pub output_dir: String,
+    pub replay_seconds: u32,
     pub fps: u32,
     pub constant_frame_rate: bool,
     pub output_height: u32,
@@ -63,6 +64,7 @@ impl Default for Settings {
             version: 1,
             launch_at_login: false,
             output_dir: String::new(),
+            replay_seconds: 120,
             fps: 60,
             constant_frame_rate: true,
             output_height: 0,
@@ -114,6 +116,7 @@ impl Settings {
         if self.codec == CodecSetting::H264 {
             self.constant_frame_rate = true;
         }
+        self.replay_seconds = self.replay_seconds.clamp(5, 600);
         if self.version == 0 {
             self.version = 1;
         }
@@ -159,9 +162,14 @@ impl SettingsStore {
     }
 
     #[cfg(debug_assertions)]
-    pub fn configure_selftest(&self, output: PathBuf) {
+    pub fn configure_selftest(&self, output: PathBuf, replay_seconds: u32) {
         let mut current = self.current.lock().unwrap();
-        *current = Settings { output_dir: output.to_string_lossy().into_owned(), mic: true, ..Settings::default() };
+        *current = Settings {
+            output_dir: output.to_string_lossy().into_owned(),
+            mic: true,
+            replay_seconds,
+            ..Settings::default()
+        };
     }
 
     pub fn set(&self, s: Settings) -> Result<Settings> {
@@ -239,8 +247,18 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 fn read_settings(path: &Path) -> (Settings, Option<String>) {
     match std::fs::read(path) {
-        Ok(bytes) => match serde_json::from_slice(&bytes) {
-            Ok(settings) => (settings, None),
+        Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
+            Ok(mut settings) => {
+                // An existing custom binding takes precedence over a new default.
+                if settings.hotkeys.parsed().is_err()
+                    && serde_json::from_slice::<serde_json::Value>(&bytes)
+                        .ok()
+                        .is_some_and(|v| v["hotkeys"].get("saveReplay").is_none())
+                {
+                    settings.hotkeys.save_replay.clear();
+                }
+                (settings, None)
+            }
             Err(error) => {
                 let backup = (|| -> std::io::Result<PathBuf> {
                     let (backup, mut file) = reserve_output(path.parent().unwrap(), "settings.json", "bad")?;
@@ -334,6 +352,18 @@ mod tests {
         atomic_write(&path, b"new settings").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"new settings");
         assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn legacy_binding_keeps_the_new_default_if_already_assigned() {
+        let dir = TestDir::new();
+        let path = dir.0.join("settings.json");
+        std::fs::write(&path, br#"{"hotkeys":{"record":"Ctrl+Shift+B"}}"#).unwrap();
+        let (settings, _) = read_settings(&path);
+        assert!(settings.hotkeys.parsed().is_ok());
+        assert_eq!(settings.hotkeys.record, "Ctrl+Shift+B");
+        assert!(settings.hotkeys.save_replay.is_empty());
+        assert_eq!(settings.replay_seconds, 120);
     }
 
     #[test]

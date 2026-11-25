@@ -48,6 +48,16 @@ pub async fn start_recording(app: AppHandle) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn start_replay(app: AppHandle) -> Result<()> {
+    blocking(move || app.state::<Recorder>().start_mode(&app, true)).await
+}
+
+#[tauri::command]
+pub async fn save_replay(app: AppHandle) -> Result<()> {
+    blocking(move || app.state::<Recorder>().save_replay(&app)).await
+}
+
+#[tauri::command]
 pub fn stop_recording(app: AppHandle) {
     app.state::<Recorder>().stop(&app);
 }

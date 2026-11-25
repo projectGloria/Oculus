@@ -18,12 +18,13 @@ use crate::capture::convert::{Converter, Nv12Pool};
 use crate::capture::gpu::Gpu;
 use crate::capture::wgc::{create_item, CaptureSession, Frame, Target};
 use crate::clock::Clock;
-use crate::encode::mf_writer::{Codec, MfWriter, VideoConfig};
+use crate::encode::mf_writer::{Codec, VideoConfig};
 use crate::error::{msg, Result, ResultContext};
 use crate::queue;
 use crate::util::{com_init, even, Mta};
 
 pub struct Config {
+    pub replay: Option<Arc<crate::replay::Buffer>>,
     pub target: Target,
     /// Region mode: pixel-exact RGB crop inside the monitor. Encoded dimensions are even-aligned separately.
     pub crop: Option<RECT>,
@@ -85,6 +86,7 @@ enum Control {
 }
 
 pub struct Handle {
+    pub replay: Option<Arc<crate::replay::Buffer>>,
     pub audio_controls: Arc<mixer::Controls>,
     tx: SyncSender<Control>,
     pub clock: Arc<Clock>,
@@ -147,6 +149,7 @@ where
     let (c, s) = (clock.clone(), stats.clone());
     let channels = Channels { tx, rx, control_tx: control_tx.clone(), control_rx, audio_tx, audio_rx };
     let health = audio.clone();
+    let replay = cfg.replay.clone();
     let output_path = cfg.path.clone();
     thread::Builder::new()
         .name("oculus-writer".into())
@@ -155,7 +158,11 @@ where
             let path = cfg.path.clone();
             let mut ready = Some(ready_tx);
             let duration = s.clone();
+            let buffer = cfg.replay.clone();
             let result = run(cfg, channels, c, s, health, controls, &mut ready);
+            if let Some(b) = buffer {
+                b.finish();
+            }
             let duration_ms = duration.duration_ms.load(Ordering::Relaxed);
             let encoder_name = duration.encoder_name.lock().unwrap().clone();
             match (ready.take(), result) {
@@ -176,7 +183,7 @@ where
         .map_err(|e| msg(e.to_string()))?;
 
     ready_rx.recv().map_err(|_| msg("recorder thread died"))??;
-    Ok(Handle { tx: control_tx, clock, stats, audio, audio_controls, path: output_path })
+    Ok(Handle { replay, tx: control_tx, clock, stats, audio, audio_controls, path: output_path })
 }
 
 fn encoder_dims(w: i32, h: i32, codec: Codec) -> (u32, u32) {
@@ -220,10 +227,10 @@ fn run(
         .unwrap_or_else(|| (out_w as f64 * out_h as f64 * cfg.fps as f64 * cfg.bpp as f64).clamp(2e6, 150e6) as u32);
     let with_audio = cfg.system_audio || cfg.mic;
 
-    let mut writer = MfWriter::new(
+    let mut writer = crate::replay::Writer::new(
         &cfg.path,
         &gpu,
-        &VideoConfig {
+        VideoConfig {
             width: out_w,
             height: out_h,
             fps: cfg.fps,
@@ -233,9 +240,10 @@ fn run(
             rate_control: cfg.rate_control,
         },
         with_audio,
+        cfg.replay.clone(),
     )
     .context("Setting up recording encoder")?;
-    *stats.encoder_name.lock().unwrap() = writer.encoder_name.clone();
+    *stats.encoder_name.lock().unwrap() = writer.current.encoder_name.clone();
 
     let conv = Converter::new(&gpu, size.Width as u32, size.Height as u32, out_w, out_h, cfg.fps, cfg.crop)?;
     let pool = Nv12Pool::new(&gpu, &conv, out_w, out_h)?;
@@ -334,11 +342,11 @@ fn run(
 
     // ---- writer loop
     let preflight_started = Instant::now();
-    let write = |m: Msg, writer: &mut MfWriter| -> Result<()> {
+    let write = |m: Msg, writer: &mut crate::replay::Writer| -> Result<()> {
         match m {
             Msg::Video(s, pts) => {
                 writer.write_video(&s.0, pts, interval)?;
-                stats.frames.store(writer.submitted_video_frames, Ordering::Relaxed);
+                stats.frames.store(writer.frames(), Ordering::Relaxed);
             }
             Msg::Audio(pcm, pts) => writer.write_audio(&pcm, pts)?,
         }
@@ -413,13 +421,13 @@ fn run(
             }
         }
     }
-    let had_video = writer.has_video();
-    stats.frames.store(writer.submitted_video_frames, Ordering::Relaxed);
-    stats.duration_ms.store(writer.duration_ms(), Ordering::Relaxed);
-    let timings = writer.timings;
+    let had_video = writer.current.has_video();
+    stats.frames.store(writer.frames(), Ordering::Relaxed);
+    stats.duration_ms.store(writer.current.duration_ms(), Ordering::Relaxed);
+    let timings = writer.current.timings;
     *stats.write_timings.lock().unwrap() = timings;
-    let video_end = writer.video_end();
-    let audio_end = writer.audio_end();
+    let video_end = writer.current.video_end();
+    let audio_end = writer.current.audio_end();
     let fin = writer.finalize();
     tracing::info!(path = %cfg.path.display(), arrived = stats.arrived.load(Ordering::Relaxed),
         encoded = stats.frames.load(Ordering::Relaxed), dropped = stats.dropped.load(Ordering::Relaxed),
@@ -498,7 +506,7 @@ fn capture_failed(tx: &SyncSender<Control>, failures: &AtomicU32, message: Strin
 fn keepalive(
     gpu: &Gpu,
     pipe: &Mutex<Pipe>,
-    writer: &mut MfWriter,
+    writer: &mut crate::replay::Writer,
     now: i64,
     interval: i64,
     stats: &Stats,
@@ -519,7 +527,7 @@ fn keepalive(
     p.last_pts = now;
     drop(guard);
     writer.write_video(&frame.sample, now, interval)?;
-    stats.frames.store(writer.submitted_video_frames, Ordering::Relaxed);
+    stats.frames.store(writer.frames(), Ordering::Relaxed);
     stats.keepalives.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
@@ -579,6 +587,7 @@ mod tests {
         media_tx.try_send(1).unwrap();
         let (control_tx, control_rx) = mpsc::sync_channel(1);
         let handle = Handle {
+            replay: None,
             audio_controls: Arc::new(mixer::Controls::default()),
             tx: control_tx,
             clock: Arc::new(Clock::default()),
