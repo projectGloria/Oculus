@@ -80,7 +80,7 @@ jobs:
           }
 
       - name: Pack with GloriaSetup
-        uses: projectGloria/GloriaSetup@v0.1.0
+        uses: projectGloria/GloriaSetup@v0.1.1
         with:
           app-dir: app-dist
           manifest: gloria.toml
